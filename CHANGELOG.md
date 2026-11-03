@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+
+- Esc closes the terminal in one press from any screen. It used to step back through every screen and click you had made. If you have typed something, the first Esc clears it.
+- Going back one screen is now Backspace on an empty command line, or the BKSP key cap in the footer (clickable).
+
 ## 0.5.5
 
 - Every key cap in the footer is now a button: GO, MENU, F1 to F4, F7, F5 and F6 can all be clicked, so navigation never depends on the keyboard.

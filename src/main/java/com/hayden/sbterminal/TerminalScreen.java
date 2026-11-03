@@ -301,7 +301,8 @@ public final class TerminalScreen extends Screen {
         gx.fill(0, y, width, height, BAR);
         int x = 4;
         x = cap("GO", "Enter", GREEN, x, y, this::enter);
-        x = cap("MENU", "Esc back", AMBER, x, y, this::escape);
+        x = cap("ESC", "close", AMBER, x, y, this::escape);
+        x = cap("BKSP", "back", GRAY, x, y, this::goBack);
         x = cap("F1", "HELP", YELLOW, x, y, () -> go(View.HELP, null));
         x = cap("F2", "MON", YELLOW, x, y, () -> go(View.MON, null));
         x = cap("F3", "MOV", YELLOW, x, y, () -> go(View.MOV, null));
@@ -329,10 +330,21 @@ public final class TerminalScreen extends Screen {
         return end + 10;
     }
 
+    /** Esc: clears what you typed, otherwise closes the terminal. One press, however many screens you visited. */
     private void escape() {
-        if (!cmd.isEmpty()) { cmd = ""; suggest = List.of(); }
-        else if (!back.isEmpty()) { Place pl = back.pop(); view = pl.view(); item = pl.item(); sel = 0; scroll = 0; status = ""; }
+        if (!cmd.isEmpty() || !suggest.isEmpty()) { cmd = ""; suggest = List.of(); }
         else onClose();
+    }
+
+    /** One screen back (Backspace on an empty line, or the BACK key cap). */
+    private void goBack() {
+        if (back.isEmpty()) return;
+        Place pl = back.pop();
+        view = pl.view();
+        item = pl.item();
+        sel = 0;
+        scroll = 0;
+        status = "";
     }
 
     // ---------- toolbar actions per screen ----------
@@ -783,7 +795,8 @@ public final class TerminalScreen extends Screen {
                 {"Left / Right", "chart range, movers window, screener sort"},
                 {"F1 F2 F3 F4", "HELP, MON, MOV, SCR"},
                 {"Ctrl+V", "paste into the command line"},
-                {"Esc", "clear the line, then go back, then close"},
+                {"Esc", "clear what you typed, then close the terminal (one press from any screen)"},
+                {"Backspace", "on an empty line: go back one screen"},
                 {"B on a hovered item", "in any menu or your inventory: opens that item here"},
                 {"/sbt radar", "open the terminal on an item from chat"},
                 {"", ""},
@@ -992,7 +1005,7 @@ public final class TerminalScreen extends Screen {
         }
         switch (k) {
             case 256 -> { escape(); return true; } // Esc: clear, back, close
-            case 259 -> { if (!cmd.isEmpty()) { cmd = cmd.substring(0, cmd.length() - 1); updateSuggestions(); } return true; }
+            case 259 -> { if (!cmd.isEmpty()) { cmd = cmd.substring(0, cmd.length() - 1); updateSuggestions(); } else goBack(); return true; }
             case 258 -> { if (dropdown) acceptSuggestion(); return true; } // Tab
             case 257, 335 -> { enter(); return true; }
             case 265 -> { // Up
