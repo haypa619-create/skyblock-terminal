@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew build --stacktrace 2>&1 | tee build.log
+      - name: Show errors
+        if: failure()
+        run: |
+          {
+            sed -n '/What went wrong/,/Try:/p' build.log
+            grep -A3 -E "error:" build.log
+          } | head -80 > errors.txt
+          msg=$(cat errors.txt | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+          echo "::error title=Build errors::$msg"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: skyblock-terminal
+          path: build/libs/*.jar
+      - name: Publish release
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2)
+          TAG="v${VERSION}-build.${{ github.run_number }}"
+          gh release create "$TAG" "build/libs/skyblock-terminal-${VERSION}.jar" \
+            --title "SkyBlock Terminal ${VERSION} (build ${{ github.run_number }})" \
+            --notes "Download the .jar below and add it to your Minecraft 26.2 profile (Modrinth App: Content > Add content > Add from file). Requires Fabric API." \
+            --latest

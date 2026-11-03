@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "sbterminal",
+  "version": "${version}",
+  "name": "SkyBlock Terminal",
+  "description": "A Bloomberg-style Bazaar terminal for Hypixel SkyBlock: live prices for every item, charts, order books, movers and a screener, driven by a command line. Press B.",
+  "authors": ["Hayden Panichelli"],
+  "license": "MIT",
+  "icon": "assets/sbterminal/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.hayden.sbterminal.Terminal"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
