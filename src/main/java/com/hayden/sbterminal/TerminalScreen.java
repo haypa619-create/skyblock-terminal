@@ -811,8 +811,8 @@ public final class TerminalScreen extends Screen {
         status("Ticket set: buy " + Fmt.qty(Terminal.CONFIG.ticketQty) + " at " + Fmt.px(sg.buy()) + ", then sell at " + Fmt.px(sg.sell()) + ". Enter places it.", GREEN);
     }
 
-    private static final String[] ACOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z"};
-    private static final double[] ACOLW = {0.24, 0.11, 0.11, 0.11, 0.09, 0.09, 0.08, 0.12, 0.05};
+    private static final String[] QCOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z"};
+    private static final double[] QCOLW = {0.24, 0.11, 0.11, 0.11, 0.09, 0.09, 0.08, 0.12, 0.05};
 
     private void drawAlgo(int top, int bottom, int mx, int my) {
         long now = System.currentTimeMillis();
@@ -827,7 +827,7 @@ public final class TerminalScreen extends Screen {
         List<Quant.Signal> res = algoCache;
         int x = gx.t(res.size() + " SIGNALS", 6, top + 2, AMBER) + 10;
         gx.t(gx.fit("Quotes at bid+0.1 / ask-0.1. EDGE/H = coins per hour after tax and a price-risk charge. Z < 0 = cheap vs fair. Signals only: you place the orders.", width - x - 10), x, top + 2, GRAY);
-        Table t = new Table(ACOLS, ACOLW);
+        Table t = new Table(QCOLS, QCOLW);
         t.header(top + LH + 4, -1, false, c -> {});
         List<String> ids = new ArrayList<>();
         for (Quant.Signal s : res) ids.add(s.p().id());
