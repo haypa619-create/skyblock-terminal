@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.4
+- Fix: Bollinger bands drew long diagonal lines from the top-left corner.
+- Chart is interactive: scroll to zoom (around the mouse), drag to pan, FIT button resets. Ranges never stretch wider than the data you have, so 1M / 3M fill the chart instead of sitting in one corner.
+
 ## 0.7.3
 - Clickable tab bar above the bottom strip with every screen (MON MOV SCR FLIP PORT PNL ALRT SECT LIM HELP), current one highlighted, hotkeys shown. The footer was too long on big GUI scales and could push buttons off screen, so it now only holds Enter / Esc / Back and the hints for the current screen (the arrow hint is clickable too).
 

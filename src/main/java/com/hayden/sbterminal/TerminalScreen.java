@@ -862,11 +862,25 @@ public final class TerminalScreen extends Screen {
         gx.fill(tx, y + 7, tx + 8, y + 9, BLUE);
         gx.t("ask", tx + 11, y + 4, GRAY);
 
-        long span = range.span;
+        if (range != chartRangeSeen || !item.equals(chartItemSeen)) { chartRangeSeen = range; chartItemSeen = item; chartSpan = 0; chartPan = 0; }
         List<Bars.Point> src = sourceFor(item);
-        List<Bars.Point> pts = new ArrayList<>(Bars.window(src, now - span, now));
-        pts.add(new Bars.Point(now, p.bid(), p.ask()));
+        long first = src.isEmpty() ? now : src.get(0).time();
+        long dataMs = Math.max(60_000L, now - first);
+        // Auto: the chosen range, but never wider than the data we have (so 1M / 3M fill the chart).
+        long span = chartSpan > 0 ? chartSpan : Math.min(range.span, dataMs);
+        long to = now - chartPan, from = to - span;
+        boolean moved = chartSpan > 0 || chartPan > 0;
+        List<Bars.Point> pts = new ArrayList<>(Bars.window(src, from, to));
+        for (int i = src.size() - 1; i >= 0; i--) if (src.get(i).time() < from) { pts.add(0, src.get(i)); break; } // one point before, so a zoomed-in line still has a start
+        if (chartPan == 0) pts.add(new Bars.Point(now, p.bid(), p.ask()));
         int px = x + 6, py = y + 20, pw = w - 64, ph = h - 34;
+        cPx = px; cPy = py; cPw = pw; cPh = ph; cSpan = span; cTo = to; cDataMs = dataMs;
+        if (moved) {
+            int fw = gx.w("FIT") + 8;
+            gx.fill(tx + 6, y + 3, tx + 6 + fw, y + 13, 0xFF2C2C2C);
+            gx.t("FIT", tx + 10, y + 4, YELLOW);
+            hits.add(new Hit(tx + 6, y + 3, tx + 6 + fw, y + 13, () -> { chartSpan = 0; chartPan = 0; }));
+        }
         double[] rg = Bars.range(pts);
         if (rg == null || pts.size() < 2) {
             gx.t(Feed.loading(item) ? "Loading history..." : "No history for this range yet.", px + 6, py + ph / 2, GRAY);
@@ -880,12 +894,11 @@ public final class TerminalScreen extends Screen {
             gx.dotted(px, px + pw, gy, GRID);
             gx.t(Fmt.px(v), px + pw + 4, gy - 4, DIM);
         }
-        long from = now - span;
         for (int i = 0; i <= 4; i++) {
             long t = from + span * i / 4;
             int lx = px + pw * i / 4;
             for (int gy = py; gy < py + ph; gy += 3) gx.fill(lx, gy, lx + 1, gy + 1, GRID);
-            String lab = i == 4 ? "now" : label(t, span);
+            String lab = i == 4 ? (chartPan == 0 ? "now" : label(t, span)) : label(t, span);
             if (i == 0) gx.t(lab, lx, py + ph + 3, DIM);
             else if (i == 4) gx.tr(lab, lx, py + ph + 3, DIM);
             else gx.tc(lab, lx, py + ph + 3, DIM);
@@ -898,12 +911,8 @@ public final class TerminalScreen extends Screen {
         if (Terminal.CONFIG.bollinger) bollinger(pts, from, span, lo, hi, px, py, pw, ph);
         plot(pts, true, from, span, lo, hi, px, py, pw, ph, GREEN);
         plot(pts, false, from, span, lo, hi, px, py, pw, ph, BLUE);
-        if (range == Command.Range.M1 || range == Command.Range.M3) {
-            long old = Feed.LONG.oldest();
-            if (old > from + span / 10) {
-                String note = "own record since " + label(old, span) + " (grows as you play)";
-                gx.tr(note, px + pw, y + 4, DIM);
-            }
+        if (range.span > dataMs && chartSpan == 0 && chartPan == 0) {
+            gx.t("all recorded data since " + label(first, 30L * 86_400_000L) + " (longer ranges fill in as you play)", px + 4, py + ph - 10, DIM);
         }
         tag(p.ask(), lo, hi, px + pw, py, ph, BLUE);
         tag(p.bid(), lo, hi, px + pw, py, ph, GREEN);
@@ -926,7 +935,8 @@ public final class TerminalScreen extends Screen {
     private void bollinger(List<Bars.Point> pts, long from, long span, double lo, double hi, int px, int py, int pw, int ph) {
         int n = 20;
         if (pts.size() < n) return;
-        int[] lx = {Integer.MIN_VALUE, 0, 0}, ly = {0, 0, 0};
+        int[] lx = {0, 0, 0}, ly = {0, 0, 0};
+        boolean started = false;
         for (int i = n - 1; i < pts.size(); i++) {
             double sum = 0;
             for (int k = i - n + 1; k <= i; k++) sum += pts.get(k).mid();
@@ -938,11 +948,11 @@ public final class TerminalScreen extends Screen {
             int[] col = {0xFF8A7A2A, 0xFF5A5A5A, 0xFF8A7A2A};
             for (int b = 0; b < 3; b++) {
                 int cy = Math.max(py, Math.min(py + ph, yOf(v[b], lo, hi, py, ph)));
-                if (lx[0] != Integer.MIN_VALUE) gx.line(lx[b], ly[b], cx, cy, col[b]);
+                if (started) gx.line(lx[b], ly[b], cx, cy, col[b]);
                 lx[b] = cx;
                 ly[b] = cy;
             }
-            if (lx[0] == Integer.MIN_VALUE) { /* unreachable: set above */ }
+            started = true;
         }
     }
 
@@ -1328,6 +1338,17 @@ public final class TerminalScreen extends Screen {
         }
     }
 
+    // chart view: zoom/pan state and where the plot is on screen
+    private static Command.Range chartRangeSeen = null;
+    private static String chartItemSeen = null;
+    private static long chartSpan = 0, chartPan = 0;
+    private int cPx, cPy, cPw, cPh;
+    private long cSpan, cTo, cDataMs;
+
+    private boolean inChart(double mx, double my) {
+        return view == View.ITEM && cPw > 0 && mx >= cPx && mx < cPx + cPw && my >= cPy && my < cPy + cPh;
+    }
+
     /** BIND: action waiting for its key press, or null. */
     private static String capturing = null;
 
@@ -1416,7 +1437,30 @@ public final class TerminalScreen extends Screen {
     }
 
     @Override
+    public boolean mouseDragged(MouseButtonEvent e, double dx, double dy) {
+        if (e.button() == 0 && inChart(e.x(), e.y()) && cSpan > 0) {
+            long now = System.currentTimeMillis();
+            long span = cSpan;
+            chartSpan = span;
+            chartPan = Math.max(0, Math.min(Math.max(0, cDataMs - span / 5), chartPan + Math.round(dx * span / (double) cPw)));
+            return true;
+        }
+        return super.mouseDragged(e, dx, dy);
+    }
+
+    @Override
     public boolean mouseScrolled(double x, double y, double dx, double dy) {
+        if (suggest.isEmpty() && inChart(x, y) && dy != 0 && cSpan > 0) {
+            long now = System.currentTimeMillis();
+            double frac = (cPx + cPw - x) / cPw; // 0 at the right edge, 1 at the left
+            long tc = cTo - Math.round(frac * cSpan);
+            long ns = Math.round(cSpan * (dy > 0 ? 0.8 : 1.25));
+            ns = Math.max(10 * 60_000L, Math.min(ns, Math.max(cDataMs + cDataMs / 5, 3_600_000L)));
+            long nto = tc + Math.round(frac * ns);
+            chartSpan = ns;
+            chartPan = Math.max(0, Math.min(Math.max(0, cDataMs - ns / 5), now - nto));
+            return true;
+        }
         if (!suggest.isEmpty()) {
             suggestSel = (int) Math.max(0, Math.min(suggest.size() - 1, suggestSel - Math.signum(dy)));
             return true;
