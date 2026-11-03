@@ -63,7 +63,11 @@ public final class Terminal implements ClientModInitializer {
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;
             String text = message.getString();
-            if (PORT.onChat(text, System.currentTimeMillis())) {
+            long nowMs = System.currentTimeMillis();
+            if (Market.strip(text).contains("reached the daily limit of coins you may create orders for")) onLimitHit(nowMs);
+            int before = PORT.ledger.size();
+            if (PORT.onChat(text, nowMs)) {
+                if (PORT.ledger.size() > before) onCounted(nowMs);
                 PORT.save();
                 java.util.regex.Matcher m = Portfolio.FILLED.matcher(Market.strip(text).trim());
                 if (CONFIG.alerts && m.matches()) alert("Order filled: " + m.group(2) + "x " + m.group(3) + ". Claim it in Manage Orders.", false);
@@ -103,6 +107,50 @@ public final class Terminal implements ClientModInitializer {
                     pending = TerminalScreen.forItem(m.isEmpty() ? null : m.get(0));
                     return 1;
                 }))));
+    }
+
+    /** Active limit amount: set/learned, else the assumed default (shown, never enforced). */
+    public static double limitAmount() { return CONFIG.limitCoins > 0 ? CONFIG.limitCoins : Limit.ASSUMED; }
+
+    public static long windowStart(long now) { return Limit.windowStart(now, CONFIG.resetMinuteUtc); }
+
+    /** Hypixel said no. The amount used then is at least where the cap is, and tells us the window is still open. */
+    private static void onLimitHit(long now) {
+        PORT.blockedAt = now;
+        long start = windowStart(now);
+        double used = PORT.usedSince(start);
+        String note;
+        if (PORT.trackingSince <= start && used >= 1e9) {
+            if (!"manual".equals(CONFIG.limitSource) && used > CONFIG.limitCoins) {
+                CONFIG.limitCoins = used;
+                CONFIG.limitSource = "learned";
+                CONFIG.save();
+            }
+            note = "Hypixel's daily limit reached. I counted " + Fmt.px(used) + " today, so your cap is at least that"
+                    + ("manual".equals(CONFIG.limitSource) ? "." : " (saved as an estimate; LIMIT <amount> sets the exact number).");
+        } else {
+            note = "Hypixel's daily limit reached. I started tracking after this window began, so I did not learn the number. LIMIT <amount> sets it.";
+        }
+        PORT.save();
+        alert(note + " Resets in " + Limit.countdown(Limit.nextReset(now, CONFIG.resetMinuteUtc) - now) + " (by my reset time).", true);
+    }
+
+    /** An order or instant trade was counted. If it went through after a block, the reset time was wrong or has passed. */
+    private static void onCounted(long now) {
+        long b = PORT.blockedAt;
+        if (b <= 0) return;
+        PORT.blockedAt = 0;
+        if (now - b > 30 * 3_600_000L || now - b < 0) return;
+        if (b >= windowStart(now) && !"manual".equals(CONFIG.resetSource)) {
+            // Blocked and allowed again inside what we thought was one window: the reset happened in between.
+            int mid = Limit.minuteOfDayUtc(b + (now - b) / 2);
+            CONFIG.resetMinuteUtc = mid;
+            CONFIG.resetSource = "learned";
+            CONFIG.save();
+            java.time.ZoneId z = java.time.ZoneId.systemDefault();
+            alert("Limit reset seen between " + Limit.clock(Limit.minuteOfDayUtc(b), z, now) + " and " + Limit.clock(Limit.minuteOfDayUtc(now), z, now)
+                    + ". Reset time set to " + Limit.clock(mid, z, now) + ". LIMIT RESET 7:00 PM sets it exactly.", false);
+        }
     }
 
     private static final java.util.Set<String> outbid = new java.util.HashSet<>();

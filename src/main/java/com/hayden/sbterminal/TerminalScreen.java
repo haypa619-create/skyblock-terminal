@@ -41,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, ITEM, PORT, PNL, ALRT, SECT, SECX, HELP, PICK }
+    enum View { MON, MOV, SCR, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -169,6 +169,7 @@ public final class TerminalScreen extends Screen {
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
             case PNL -> drawPnl(y, bottom, mx, my);
+            case LIM -> drawLimit(y, bottom, mx, my);
             case ALRT -> drawAlerts(y, bottom, mx, my);
             case SECT -> drawSectors(y, bottom, mx, my);
             case SECX -> drawSectorItems(y, bottom, mx, my);
@@ -188,8 +189,12 @@ public final class TerminalScreen extends Screen {
         gx.t(gx.fit(screenTitle(), width / 2 - x), x, 3, WHITE);
         StringBuilder r = new StringBuilder();
         if (Terminal.purse >= 0) r.append("PURSE ").append(Fmt.px(Terminal.purse)).append("  ");
-        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
-        if (used > 0) r.append("LIMIT ").append(Fmt.px(used)).append("/").append(Fmt.px(Terminal.CONFIG.dailyLimit)).append("  ");
+        long nowT = System.currentTimeMillis();
+        double used = Terminal.PORT.usedSince(Terminal.windowStart(nowT));
+        if (used > 0) {
+            r.append("LIMIT ").append(Fmt.px(used)).append("/").append(Terminal.CONFIG.limitCoins > 0 ? "" : "~").append(Fmt.px(Terminal.limitAmount()))
+                    .append(" resets ").append(Limit.countdown(Limit.nextReset(nowT, Terminal.CONFIG.resetMinuteUtc) - nowT)).append("  ");
+        }
         Market.Snapshot s = Feed.snapshot;
         if (s.hypixelUpdated() > 0) r.append("DATA ").append(Fmt.ago(System.currentTimeMillis() - s.hypixelUpdated())).append("  ");
         r.append(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
@@ -204,6 +209,7 @@ public final class TerminalScreen extends Screen {
             case ITEM -> "DES";
             case PORT -> "PORT";
             case PNL -> "PNL";
+            case LIM -> "LIM";
             case ALRT -> "ALRT";
             case SECT, SECX -> "SECT";
             case HELP -> "HELP";
@@ -219,6 +225,7 @@ public final class TerminalScreen extends Screen {
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
             case PNL -> "P&L history";
+            case LIM -> "Daily limit";
             case ALRT -> "Alerts";
             case SECT -> "Sectors";
             case SECX -> sector + " sector";
@@ -355,6 +362,16 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Re-arm", () -> rearm(false)));
                 a.add(new Action("Re-arm all", () -> rearm(true)));
                 a.add(new Action("Clear fired", () -> { Terminal.CONFIG.priceAlerts.removeIf(r -> r.fired); Terminal.CONFIG.save(); }));
+            }
+            case LIM -> {
+                a.add(new Action("Set limit", () -> { cmd = "LIMIT "; status("e.g. LIMIT 15B", GRAY); }));
+                a.add(new Action("Set reset time", () -> { cmd = "LIMIT RESET "; status("Your local time, e.g. 7:00 PM, or UTC 23:00", GRAY); }));
+                a.add(new Action("Forget learned", () -> {
+                    if (!"manual".equals(Terminal.CONFIG.limitSource)) { Terminal.CONFIG.limitCoins = 0; Terminal.CONFIG.limitSource = ""; }
+                    if (!"manual".equals(Terminal.CONFIG.resetSource)) Terminal.CONFIG.resetSource = "";
+                    Terminal.CONFIG.save();
+                    status("Cleared what was learned (manual settings stay)", GRAY);
+                }));
             }
             case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
             case SECX -> a.add(new Action("All sectors", () -> go(View.SECT, null)));
@@ -740,7 +757,8 @@ public final class TerminalScreen extends Screen {
                 {"ALERT coal < 120", "alert once in chat (also BID ASK SPR CHG1H). ALRT lists them"},
                 {"PNL / SECT", "P&L history / sector index moves"},
                 {"CMP coal", "on an item page: overlay another item (% change). CMP alone clears"},
-                {"LIMIT 15B", "your daily Bazaar limit (the ticket checks it)"},
+                {"LIMIT", "daily limit ledger: what counted, when, and the reset countdown"},
+                {"LIMIT 15B / LIMIT RESET 7:00 PM", "set the cap and the daily reset (your time). Both are learned from Hypixel if you don't"},
                 {"FONT MONO / FONT MC", "terminal font or Minecraft font"},
                 {"2 <GO>", "run toolbar action 2 (or click it)"},
                 {"", ""},
@@ -1084,13 +1102,7 @@ public final class TerminalScreen extends Screen {
                 if (view != View.ITEM) { status("Open an item, then CMP shows both on its chart", GRAY); return; }
                 status("Comparing with " + Feed.name(cmpItem) + " (% change from the start of the range). CMP alone clears.", GREEN);
             }
-            case LIMIT -> {
-                double v = Ticket.parseNum(c.item());
-                if (v <= 0) { status("LIMIT 15B (now " + Fmt.px(Terminal.CONFIG.dailyLimit) + ")", GRAY); return; }
-                Terminal.CONFIG.dailyLimit = v;
-                Terminal.CONFIG.save();
-                status("Daily limit " + Fmt.px(v), GREEN);
-            }
+            case LIMIT -> limitCommand(c.item());
             case POS -> posCommand(c.item());
             case BUY, SELL -> ticketCommand(c);
             case QTY -> {
@@ -1266,6 +1278,92 @@ public final class TerminalScreen extends Screen {
     }
 
     private static String signed(double v) { return (v >= 0 ? "+" : "-") + Fmt.px(Math.abs(v)); }
+
+    // ---------- LIMIT ----------
+
+    private void limitCommand(String args) {
+        String a = args == null ? "" : args.trim();
+        long now = System.currentTimeMillis();
+        if (a.isEmpty()) { go(View.LIM, null); return; }
+        String up = a.toUpperCase(Locale.US);
+        if (up.startsWith("RESET")) {
+            String t = a.substring(5).trim();
+            if (t.equalsIgnoreCase("AUTO")) { Terminal.CONFIG.resetSource = ""; Terminal.CONFIG.save(); status("Reset time will be learned again", GREEN); return; }
+            int m = Limit.parseClock(t, java.time.ZoneId.systemDefault(), now);
+            if (m < 0) { status("LIMIT RESET 7:00 PM (your time) or LIMIT RESET UTC 23:00", RED); return; }
+            Terminal.CONFIG.resetMinuteUtc = m;
+            Terminal.CONFIG.resetSource = "manual";
+            Terminal.CONFIG.save();
+            status("Limit resets daily at " + Limit.clock(m, java.time.ZoneId.systemDefault(), now), GREEN);
+            return;
+        }
+        if (up.equals("AUTO") || up.equals("CLEAR")) {
+            Terminal.CONFIG.limitCoins = 0;
+            Terminal.CONFIG.limitSource = "";
+            Terminal.CONFIG.save();
+            status("Limit cleared. It is learned from Hypixel's limit message.", GRAY);
+            return;
+        }
+        double v = Ticket.parseNum(a);
+        if (v <= 0) { status("LIMIT 15B, LIMIT RESET 7:00 PM, or LIMIT AUTO", RED); return; }
+        Terminal.CONFIG.limitCoins = v;
+        Terminal.CONFIG.limitSource = "manual";
+        Terminal.CONFIG.save();
+        status("Daily limit " + Fmt.px(v), GREEN);
+    }
+
+    private void drawLimit(int top, int bottom, int mx, int my) {
+        long now = System.currentTimeMillis();
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        Config c = Terminal.CONFIG;
+        long ws = Terminal.windowStart(now), nr = Limit.nextReset(now, c.resetMinuteUtc);
+        double used = Terminal.PORT.usedSince(ws), lim = Terminal.limitAmount(), left = Math.max(0, lim - used);
+        String lsrc = c.limitCoins > 0 ? c.limitSource : "not known, ~15B assumed";
+        String rsrc = c.resetSource.isEmpty() ? "assumed" : c.resetSource;
+        int x = 6;
+        x = pair("USED ", Fmt.px(used), x, top + 2, WHITE);
+        x = pair("LIMIT ", (c.limitCoins > 0 ? "" : "~") + Fmt.px(lim) + " (" + lsrc + ")", x, top + 2, c.limitCoins > 0 ? AMBER : GRAY);
+        x = pair("LEFT ", Fmt.px(left), x, top + 2, left <= 0 ? RED : GREEN);
+        int y = top + LH + 4;
+        x = pair("RESETS IN ", Limit.countdown(nr - now), 6, y, WHITE);
+        x = pair("RESET AT ", Limit.clock(c.resetMinuteUtc, zone, now) + " (" + rsrc + ")", x, y, GRAY);
+        boolean blocked = Terminal.PORT.blockedAt >= ws;
+        if (blocked) gx.t("HYPIXEL BLOCKED YOU " + Fmt.ago(now - Terminal.PORT.blockedAt) + " AGO", x + 10, y, RED);
+        y += LH + 3;
+        int bw = width - 12;
+        gx.fill(6, y, 6 + bw, y + 7, 0xFF1C1C1C);
+        gx.fill(6, y, 6 + (int) (bw * Math.min(1, used / lim)), y + 7, used / lim > 0.9 ? RED : used / lim > 0.7 ? YELLOW : GREEN);
+        gx.box(6, y, bw, 7, LINE);
+        y += 12;
+        gx.t("COUNTED TODAY", 6, y, AMBER);
+        gx.t("every order, offer and instant trade; cancelling does not give it back", 14 + gx.w("COUNTED TODAY"), y, DIM);
+        y += LH + 1;
+        gx.t("TIME", 6, y, AMBER);
+        gx.t("TYPE", 6 + gx.cw() * 11, y, AMBER);
+        gx.t("ITEM", 6 + gx.cw() * 23, y, AMBER);
+        gx.tr("VALUE", (int) (width * 0.74), y, AMBER);
+        gx.tr("RUNNING", width - 6, y, AMBER);
+        gx.hline(4, width - 4, y + LH - 1, LINE);
+        y += LH + 1;
+        List<Portfolio.Entry> es = Terminal.PORT.ledgerSince(ws);
+        double[] run = new double[es.size()];
+        double acc = 0;
+        for (int i = 0; i < es.size(); i++) { acc += es.get(i).value; run[i] = acc; }
+        int fit = Math.max(1, (bottom - y - LH - 2) / LH);
+        if (es.isEmpty()) gx.t("Nothing counted since the window opened. Orders placed while the terminal is loaded are logged here.", 6, y, GRAY);
+        for (int k = 0; k < Math.min(fit, es.size()); k++) {
+            int i = es.size() - 1 - k, yy = y + k * LH;
+            Portfolio.Entry e = es.get(i);
+            gx.t(DateTimeFormatter.ofPattern("HH:mm:ss").format(java.time.Instant.ofEpochMilli(e.at).atZone(zone)), 6, yy, GRAY);
+            gx.t(e.kind, 6 + gx.cw() * 11, yy, e.kind.startsWith("BUY") || e.kind.equals("INSTA BUY") ? GREEN : RED);
+            gx.t(gx.fit(e.name, (int) (width * 0.74) - gx.cw() * 23 - 90), 6 + gx.cw() * 23, yy, WHITE);
+            gx.tr(Fmt.px(e.value), (int) (width * 0.74), yy, WHITE);
+            gx.tr(Fmt.px(run[i]), width - 6, yy, GRAY);
+        }
+        double prev = Terminal.PORT.usedSince(ws - Limit.DAY) - used;
+        gx.t("PREVIOUS WINDOW " + Fmt.px(prev) + (Terminal.PORT.trackingSince > ws - Limit.DAY ? "  (tracking began partway, so this is partial)" : ""), 6, bottom - LH, DIM);
+        rows = new ArrayList<>();
+    }
 
     // ---------- compare (CMP) ----------
 
@@ -1632,9 +1730,17 @@ public final class TerminalScreen extends Screen {
         }
         double price = instant ? 0 : ticketPrice(p, side);
         double value = side == Ticket.Side.BUY ? qty * (instant ? p.ask() : price) : Guide.carrying(item) * (instant ? p.bid() : price);
-        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
-        if (used + value > Terminal.CONFIG.dailyLimit) {
-            status("Over your daily limit: " + Fmt.px(used) + " used + " + Fmt.px(value) + " > " + Fmt.px(Terminal.CONFIG.dailyLimit) + ". Lower QTY or LIMIT.", RED);
+        long nowT = System.currentTimeMillis();
+        long ws = Terminal.windowStart(nowT);
+        double used = Terminal.PORT.usedSince(ws);
+        long untilReset = Limit.nextReset(nowT, Terminal.CONFIG.resetMinuteUtc) - nowT;
+        if (Terminal.PORT.blockedAt >= ws) {
+            status("Hypixel said the daily limit was reached today. Resets in about " + Limit.countdown(untilReset) + " (LIMIT shows the ledger).", RED);
+            return;
+        }
+        if ("manual".equals(Terminal.CONFIG.limitSource) && used + value > Terminal.CONFIG.limitCoins) {
+            status("Over your daily limit: " + Fmt.px(used) + " used + " + Fmt.px(value) + " > " + Fmt.px(Terminal.CONFIG.limitCoins)
+                    + ". Resets in " + Limit.countdown(untilReset) + ". Lower QTY.", RED);
             return;
         }
         Ticket.Active a = new Ticket.Active(item, Feed.name(item), side, instant ? Ticket.Mode.INSTA : Ticket.Mode.ORDER, price, qty, System.currentTimeMillis());
@@ -1715,10 +1821,10 @@ public final class TerminalScreen extends Screen {
             else { double pl = (px * tax - pos.cost) * Math.max(1, Guide.carrying(item)); gx.tr(signed(pl) + " net", x + w - 5, ry, changeColor(pl)); }
         }
         ry += LH + 1;
-        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
-        double left = Terminal.CONFIG.dailyLimit - used;
+        double used = Terminal.PORT.usedSince(Terminal.windowStart(System.currentTimeMillis()));
+        double left = Terminal.limitAmount() - used;
         gx.t("LIMIT LEFT", x + 5, ry, AMBER_DIM);
-        gx.tr(Fmt.px(Math.max(0, left)), x + w - 5, ry, left < total ? RED : GRAY);
+        gx.tr((Terminal.CONFIG.limitCoins > 0 ? "" : "~") + Fmt.px(Math.max(0, left)), x + w - 5, ry, left < total ? RED : GRAY);
         ry += LH + 3;
         // big GO button
         int bx = x + 4, bw = w - 8;

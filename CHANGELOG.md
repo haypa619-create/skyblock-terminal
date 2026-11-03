@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- Daily limit rebuilt, nothing hardcoded. The cap comes from LIMIT <amount>, or is learned from Hypixel's "reached the daily limit" message (saved as an estimate, shown with ~). Until then 15B is only displayed, never enforced.
+- The reset time is a setting (LIMIT RESET 7:00 PM, your time or UTC). If an order goes through after Hypixel blocked you inside what the mod thought was one window, it works out the reset happened in between and moves the reset time there.
+- LIMIT now opens a ledger: every order, offer and instant trade with the time you did it, a running total, the bar, time until reset, and whether Hypixel blocked you. Cancelled orders still count.
+- The header shows used/limit and the reset countdown. After Hypixel says you hit the limit, the ticket stops you until the reset instead of sending you through the menus.
+- The ticket only blocks on a cap you set yourself; learned and assumed caps show a ~ estimate.
+
 ## 0.5.0
 
 - Daily limit: every order and insta-trade you place is added up per day. The header shows LIMIT used/15B, the ticket shows what is left and blocks an order that would pass it. LIMIT 15B changes it.

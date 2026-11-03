@@ -28,6 +28,13 @@ public final class Portfolio {
         public double units, cost; // cost = average price per unit
     }
 
+    /** One order, offer or instant trade that counts toward the daily limit. */
+    public static final class Entry {
+        public long at;
+        public String kind, name;
+        public double value;
+    }
+
     /** A closed sale against tracked cost. */
     public static final class Trade {
         public String name;
@@ -52,8 +59,12 @@ public final class Portfolio {
     public double untrackedUnits = 0;
     /** When Manage Orders last replaced the order list (0 = never). */
     public long syncedAt = 0;
-    /** yyyy-MM-dd -> coins of orders placed and insta-trades (for the daily Bazaar limit). */
-    public Map<String, Double> placed = new LinkedHashMap<>();
+    /** Everything counted against the daily limit, with the time you did it. Cancelled orders still count. */
+    public List<Entry> ledger = new ArrayList<>();
+    /** When the terminal started recording the ledger, so a learned limit is only trusted if it saw the whole window. */
+    public long trackingSince = 0;
+    /** When Hypixel last told you the limit was reached (0 = never). */
+    public long blockedAt = 0;
     public List<Trade> trades = new ArrayList<>();
     /** "B:item" / "S:item" -> how long orders took to fill, newest last (ms). */
     public Map<String, List<Long>> fills = new LinkedHashMap<>();
@@ -83,7 +94,8 @@ public final class Portfolio {
         if (p.positions == null) p.positions = new LinkedHashMap<>();
         if (p.orders == null) p.orders = new ArrayList<>();
         if (p.daily == null) p.daily = new LinkedHashMap<>();
-        if (p.placed == null) p.placed = new LinkedHashMap<>();
+        if (p.ledger == null) p.ledger = new ArrayList<>();
+        if (p.trackingSince == 0) p.trackingSince = System.currentTimeMillis();
         if (p.trades == null) p.trades = new ArrayList<>();
         if (p.fills == null) p.fills = new LinkedHashMap<>();
         p.file = f;
@@ -129,7 +141,7 @@ public final class Portfolio {
             o.price = num(m.group(4)) / u;
             o.at = now;
             orders.add(o);
-            placed.merge(day(now), num(m.group(4)), Double::sum);
+            record(o.buy ? "BUY ORDER" : "SELL OFFER", o.name, num(m.group(4)), now);
             return true;
         }
         if ((m = FILLED.matcher(line)).matches()) {
@@ -176,14 +188,14 @@ public final class Portfolio {
             double u = num(m.group(1));
             if (u <= 0) return false;
             addUnits(m.group(2), u, num(m.group(3)) / u);
-            placed.merge(day(now), num(m.group(3)), Double::sum);
+            record("INSTA BUY", m.group(2), num(m.group(3)), now);
             return true;
         }
         if ((m = INSTA_SELL.matcher(line)).matches()) {
             double u = num(m.group(1));
             if (u <= 0) return false;
             sellUnits(m.group(2), u, num(m.group(3)), now);
-            placed.merge(day(now), num(m.group(3)), Double::sum);
+            record("INSTA SELL", m.group(2), num(m.group(3)), now);
             return true;
         }
         return false;
@@ -279,7 +291,29 @@ public final class Portfolio {
 
     // ---------- limit, locked coins, fill times ----------
 
-    public synchronized double placedOn(String day) { return placed.getOrDefault(day, 0.0); }
+    private void record(String kind, String name, double value, long now) {
+        Entry e = new Entry();
+        e.at = now;
+        e.kind = kind;
+        e.name = name;
+        e.value = value;
+        ledger.add(e);
+        long cut = now - 8 * Limit.DAY;
+        ledger.removeIf(x -> x.at < cut);
+    }
+
+    /** Coins counted against the limit since a window started. */
+    public synchronized double usedSince(long start) {
+        double s = 0;
+        for (Entry e : ledger) if (e.at >= start) s += e.value;
+        return s;
+    }
+
+    public synchronized List<Entry> ledgerSince(long start) {
+        List<Entry> out = new ArrayList<>();
+        for (Entry e : ledger) if (e.at >= start) out.add(e);
+        return out;
+    }
 
     /** Coins sitting in buy orders that have not filled yet. */
     public synchronized double lockedInBuys() {

@@ -22,8 +22,13 @@ public final class Config {
     public double taxPct = 1.25;
     /** Chat + sound when an order is outbid or filled. */
     public boolean alerts = true;
-    /** Hypixel's daily Bazaar limit in coins; the ticket warns before you pass it. */
-    public double dailyLimit = 15_000_000_000.0;
+    /** Daily Bazaar limit in coins. 0 = not known yet (set with LIMIT or learned from Hypixel's limit message). */
+    public double limitCoins = 0;
+    /** "manual" or "learned" (empty while unknown). */
+    public String limitSource = "";
+    /** When the limit window resets, as minutes after midnight UTC. Set with LIMIT RESET, corrected when seen. */
+    public int resetMinuteUtc = 0;
+    public String resetSource = "";
     /** Price alerts (ALERT coal < 120). */
     public List<Alerts.Rule> priceAlerts = new ArrayList<>();
     /** Order ticket: last quantity used for buy orders. */

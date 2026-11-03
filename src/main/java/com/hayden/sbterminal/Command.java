@@ -26,7 +26,7 @@ public final class Command {
             {"BUY", "BUY 5k [price] [NOW]: open the order in the Bazaar"}, {"SELL", "SELL [price] [NOW]: list what you carry"},
             {"PORT", "Portfolio: positions, cost, P&L, open orders"}, {"PNL", "P&L history: equity curve, by day, by item"},
             {"ALERT", "ALERT coal < 120 (or BID/ASK/SPR/CHG1H)"}, {"ALRT", "Your alerts"}, {"SECT", "Sectors: index moves by Bazaar category"},
-            {"CMP", "CMP <item>: compare on the chart (CMP alone clears)"}, {"LIMIT", "LIMIT 15B: your daily Bazaar limit"}, {"POS", "POS item units cost: set a position by hand"},
+            {"CMP", "CMP <item>: compare on the chart (CMP alone clears)"}, {"LIMIT", "Daily limit ledger, LIMIT 15B, LIMIT RESET 7:00 PM"}, {"POS", "POS item units cost: set a position by hand"},
             {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"}};
     public enum Range {
         H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L);
