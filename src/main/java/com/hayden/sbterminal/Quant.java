@@ -28,7 +28,7 @@ public final class Quant {
      * @param why   short reason when skipped, else the stance
      */
     public record Signal(Market.Product p, double fair, double z, double sigma, double buy, double sell, double net, double riskAdj,
-                         double units, double cycle, double edgeH, boolean skip, String why) {}
+                         double units, double cycle, double edgeH, boolean skip, String why, double pred) {}
 
     // ---------- model pieces ----------
 
@@ -80,6 +80,11 @@ public final class Quant {
 
     /** @param recent mid history for roughly the last day, oldest first */
     public static Signal signal(Market.Product p, List<Bars.Point> recent, Params q) {
+        return signal(p, recent, q, Double.NaN, false);
+    }
+
+    /** @param pred model's predicted % move over 4h (NaN = none); @param trusted whether the model has earned the right to change the signal */
+    public static Signal signal(Market.Product p, List<Bars.Point> recent, Params q, double pred, boolean trusted) {
         if (p.bid() <= 0 || p.ask() <= 0) return null;
         double buy = p.bid() + 0.1, sell = p.ask() - 0.1;
         double net = sell * q.tax() - buy;
@@ -92,31 +97,40 @@ public final class Quant {
 
         double inH = p.instaSellWeek() / 168.0, outH = p.instaBuyWeek() / 168.0; // insta-sells fill buy orders, insta-buys fill sell offers
         double flow = Math.min(inH, outH) * q.share();
-        if (flow <= 0 || net <= 0) return new Signal(p, fair, z, sg, buy, sell, net, net, 0, 0, 0, true, net <= 0 ? "no margin" : "no volume");
+        if (flow <= 0 || net <= 0) return new Signal(p, fair, z, sg, buy, sell, net, net, 0, 0, 0, true, net <= 0 ? "no margin" : "no volume", pred);
         double units = Math.min(Math.min(q.invUnits(), Math.max(0, q.purse()) * q.purseFrac() / buy), Math.max(0, q.limitLeft()) / buy);
         units = Math.min(units, flow * 2); // never queue more than about two hours of flow
-        if (units < 1) return new Signal(p, fair, z, sg, buy, sell, net, net, 0, 0, 0, true, "no room (purse, limit or volume)");
+        if (units < 1) return new Signal(p, fair, z, sg, buy, sell, net, net, 0, 0, 0, true, "no room (purse, limit or volume)", pred);
         double cycle = Math.max(0.05, units / (inH * q.share()) + units / (outH * q.share()));
         double riskAdj = net - q.risk() * 0.5 * sg * Math.sqrt(cycle) * mid;
+        boolean learned = trusted && !Double.isNaN(pred);
+        if (learned) riskAdj += pred / 100.0 * mid * Math.min(1, cycle / 4.0); // expected drift while you hold
         boolean risky = net / buy * 100 > 100 || p.bidOrders() < 5 || p.askOrders() < 5;
         String why;
         boolean skip = false;
         if (risky) { skip = true; why = "thin book or huge margin: looks manipulated"; }
         else if (z > 2) { skip = true; why = "price spiked above fair: wait"; }
+        else if (learned && pred < -1.5) { skip = true; why = "model expects a drop over the next 4h"; }
         else if (riskAdj <= 0) { skip = true; why = "risk eats the margin"; }
         else why = z < -1 ? "cheap vs fair: buy side favoured" : z > 1 ? "rich vs fair: sell side favoured" : "quote both sides";
-        return new Signal(p, fair, z, sg, buy, sell, net, riskAdj, units, cycle, skip ? 0 : units * riskAdj / cycle, skip, why);
+        return new Signal(p, fair, z, sg, buy, sell, net, riskAdj, units, cycle, skip ? 0 : units * riskAdj / cycle, skip, why + (learned ? " (model adjusted)" : ""), pred);
     }
 
     public static List<Signal> rank(Collection<Market.Product> products, java.util.function.Function<String, List<Bars.Point>> recent,
                                     Params q, double minWeekVolume, double minPrice, int candidates) {
+        return rank(products, recent, q, minWeekVolume, minPrice, candidates, id -> Double.NaN, false);
+    }
+
+    public static List<Signal> rank(Collection<Market.Product> products, java.util.function.Function<String, List<Bars.Point>> recent,
+                                    Params q, double minWeekVolume, double minPrice, int candidates,
+                                    java.util.function.ToDoubleFunction<String> pred, boolean trusted) {
         List<Market.Product> cand = new ArrayList<>();
         for (Market.Product p : products) if (p.bid() >= minPrice && p.weekVolume() >= minWeekVolume) cand.add(p);
         cand.sort(Comparator.comparingDouble(Market.Product::coinFlowDay).reversed());
         if (cand.size() > candidates) cand = cand.subList(0, candidates);
         List<Signal> out = new ArrayList<>();
         for (Market.Product p : cand) {
-            Signal s = signal(p, recent.apply(p.id()), q);
+            Signal s = signal(p, recent.apply(p.id()), q, pred.applyAsDouble(p.id()), trusted);
             if (s != null && !s.skip()) out.add(s);
         }
         out.sort(Comparator.comparingDouble(Signal::edgeH).reversed());

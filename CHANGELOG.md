@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.0
+- NEWS: SkyBlock time, the current mayor and perks (with the sectors they lean on and those sectors' 24h moves), the running election with vote shares, a countdown to the recurring events (Spooky, Jerry, Zoo, New Year, Dark Auction, Jacob's) and Hypixel news (click to copy the link).
+- ML: an online learning model that predicts the 4-hour move from cheapness vs fair value, volatility, spread, recent moves, hour of day, event closeness and whether the mayor leans on the item's sector. It warm-starts from a week of history, then learns from every live 4-hour outcome, saved to config/sbterminal-model.json. Each sample is tested before it is learned from, so the skill shown is out of sample.
+- ALGO uses the model only once it has 1000+ samples, positive skill and over 52% direction; before that the ML 4H column is grey and changes nothing. A trusted forecast adjusts the edge and skips buys it expects to drop.
+
 ## 0.9.0
 - ALGO (F10): trading model. Market-making signals with fair value (EWMA + book microprice), hourly volatility, fill-time from real insta-trade flow, a price-risk charge, and sizing capped by purse, inventory, daily limit and market flow. Ranks by risk-adjusted coins per hour; skips spikes, thin books and no-margin items. Trade selected fills the order ticket. Signals only, you place the orders.
 - BT <item>: backtests a fixed mean-reversion rule on years of daily history, with buy-and-hold and first/second-half comparisons. Optimistic fills, stated on the screen.

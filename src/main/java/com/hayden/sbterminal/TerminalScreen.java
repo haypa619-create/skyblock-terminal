@@ -41,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, FLIP, ALGO, BT, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
+    enum View { MON, MOV, SCR, FLIP, ALGO, BT, NEWS, ML, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -188,6 +188,8 @@ public final class TerminalScreen extends Screen {
             case FLIP -> drawFlips(y, bottom, mx, my);
             case ALGO -> drawAlgo(y, bottom, mx, my);
             case BT -> drawBacktest(y, bottom, mx, my);
+            case NEWS -> drawNews(y, bottom, mx, my);
+            case ML -> drawMl(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
             case PNL -> drawPnl(y, bottom, mx, my);
@@ -231,6 +233,8 @@ public final class TerminalScreen extends Screen {
             case FLIP -> "FLIP";
             case ALGO -> "ALGO";
             case BT -> "BT";
+            case NEWS -> "NEWS";
+            case ML -> "ML";
             case ITEM -> "DES";
             case PORT -> "PORT";
             case PNL -> "PNL";
@@ -250,6 +254,8 @@ public final class TerminalScreen extends Screen {
             case FLIP -> "Flip finder";
             case ALGO -> "Trading model";
             case BT -> "Backtest";
+            case NEWS -> "News and calendar";
+            case ML -> "Learning model";
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
             case PNL -> "P&L history";
@@ -325,17 +331,17 @@ public final class TerminalScreen extends Screen {
     /** Clickable tab bar: every screen, with its hotkey when it has one. */
     private void drawTabs(int y, int mx, int my) {
         gx.fill(0, y, width, y + 11, 0xFF101010);
-        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"ALGO", "ALGO"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
+        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"ALGO", "ALGO"}, {"NEWS", "NEWS"}, {"ML", "ML"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
                 {"SECT", null}, {"LIM", null}, {"HELP", "HELP"}};
-        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.ALGO, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
+        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.ALGO, View.NEWS, View.ML, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
         int total = 0;
-        for (String[] t : tabs) total += gx.w((t[1] != null ? keyLabel(t[1]) + " " : "") + t[0]) + 14;
+        for (String[] t : tabs) total += gx.w((t[1] != null && Keys.of(Terminal.CONFIG.keys, t[1]) >= 0 ? keyLabel(t[1]) + " " : "") + t[0]) + 14;
         boolean keys = total <= width - 8;
         int x = 4;
         for (int i = 0; i < tabs.length; i++) {
             View v = views[i];
             boolean on = view == v || (v == View.SECT && view == View.SECX);
-            String lab = (keys && tabs[i][1] != null ? keyLabel(tabs[i][1]) + " " : "") + tabs[i][0];
+            String lab = (keys && tabs[i][1] != null && Keys.of(Terminal.CONFIG.keys, tabs[i][1]) >= 0 ? keyLabel(tabs[i][1]) + " " : "") + tabs[i][0];
             int w = gx.w(lab) + 10;
             boolean hover = mx >= x && mx < x + w && my >= y && my < y + 11;
             gx.fill(x, y + 1, x + w, y + 10, on ? AMBER : hover ? 0xFF2C2C2C : 0xFF1C1C1C);
@@ -461,6 +467,7 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Share " + Math.round(Terminal.CONFIG.algoShare * 100) + "%", () -> { double[] o = {0.15, 0.3, 0.5}; int i = 0; for (int k = 0; k < o.length; k++) if (Math.abs(o[k] - Terminal.CONFIG.algoShare) < 1e-9) i = k; Terminal.CONFIG.algoShare = o[(i + 1) % o.length]; Terminal.CONFIG.save(); algoAt = 0; }));
             }
             case BT -> { a.add(new Action("Back to ALGO", () -> go(View.ALGO, null))); }
+            case ML -> a.add(new Action("Reset model", () -> { Learner.reset(); status("Model reset: it starts learning again from zero", GRAY); }));
             case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
             case SECX -> a.add(new Action("All sectors", () -> go(View.SECT, null)));
             case MOV -> {
@@ -811,8 +818,8 @@ public final class TerminalScreen extends Screen {
         status("Ticket set: buy " + Fmt.qty(Terminal.CONFIG.ticketQty) + " at " + Fmt.px(sg.buy()) + ", then sell at " + Fmt.px(sg.sell()) + ". Enter places it.", GREEN);
     }
 
-    private static final String[] QCOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z"};
-    private static final double[] QCOLW = {0.24, 0.11, 0.11, 0.11, 0.09, 0.09, 0.08, 0.12, 0.05};
+    private static final String[] QCOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z", "ML 4H"};
+    private static final double[] QCOLW = {0.22, 0.10, 0.10, 0.10, 0.08, 0.08, 0.07, 0.11, 0.05, 0.09};
 
     private void drawAlgo(int top, int bottom, int mx, int my) {
         long now = System.currentTimeMillis();
@@ -822,11 +829,11 @@ public final class TerminalScreen extends Screen {
             Quant.Params q = new Quant.Params(1 - Terminal.CONFIG.taxPct / 100.0, Terminal.CONFIG.algoShare, Terminal.CONFIG.algoPurseFrac, Terminal.CONFIG.algoRisk,
                     Terminal.purse >= 0 ? Terminal.purse : 1e9, Terminal.CONFIG.flipInvUnits, limitLeft);
             algoCache = Quant.rank(Feed.snapshot.products().values(), id -> { Feed.day(id); return Feed.recent(id); }, q,
-                    Terminal.CONFIG.minWeekVolume, Terminal.CONFIG.flipMinPrice, 80);
+                    Terminal.CONFIG.minWeekVolume, Terminal.CONFIG.flipMinPrice, 80, Learner::predictFor, Learner.MODEL.trusted());
         }
         List<Quant.Signal> res = algoCache;
         int x = gx.t(res.size() + " SIGNALS", 6, top + 2, AMBER) + 10;
-        gx.t(gx.fit("Quotes at bid+0.1 / ask-0.1. EDGE/H = coins per hour after tax and a price-risk charge. Z < 0 = cheap vs fair. Signals only: you place the orders.", width - x - 10), x, top + 2, GRAY);
+        gx.t(gx.fit("Quotes at bid+0.1 / ask-0.1. EDGE/H = coins per hour after tax and a price-risk charge. Z < 0 = cheap vs fair. ML 4H is grey until the model is trusted (see ML). Signals only: you place the orders.", width - x - 10), x, top + 2, GRAY);
         Table t = new Table(QCOLS, QCOLW);
         t.header(top + LH + 4, -1, false, c -> {});
         List<String> ids = new ArrayList<>();
@@ -850,6 +857,7 @@ public final class TerminalScreen extends Screen {
             t.cell(6, y, String.format(Locale.US, "%.1fh", s.cycle()), GRAY, 0);
             t.cell(7, y, Fmt.px(s.edgeH()), AMBER, 0);
             t.cell(8, y, String.format(Locale.US, "%+.1f", s.z()), s.z() < -1 ? GREEN : s.z() > 1 ? RED : GRAY, 0);
+            t.cell(9, y, Double.isNaN(s.pred()) ? "-" : String.format(Locale.US, "%+.2f%%", s.pred()), Double.isNaN(s.pred()) || !Learner.MODEL.trusted() ? DIM : changeColor(s.pred()), 0);
         }
         if (!res.isEmpty() && sel < res.size()) {
             Quant.Signal s = res.get(sel);
@@ -936,6 +944,144 @@ public final class TerminalScreen extends Screen {
         gx.t(gx.fit("Read it carefully: this assumes every order fills the day you place it, which is optimistic, and daily candles hide intraday swings. "
                 + "If the two halves disagree or the trades are few, don't trust it. " + r.note(), width - 12), 6, ny, r.trades() < 10 ? YELLOW : DIM);
         gx.t(gx.fit("It only tests the 'buy cheap vs fair' part. Market-making fills need live order-book data; the ALGO screen is the live side.", width - 12), 6, ny + LH, DIM);
+    }
+
+    // ---------- NEWS: mayor, election, calendar, news ----------
+
+    private static String until(long ms) {
+        long h = ms / 3_600_000L;
+        return h >= 48 ? (h / 24) + "d " + (h % 24) + "h" : Limit.countdown(ms);
+    }
+
+    private void drawNews(int top, int bottom, int mx, int my) {
+        rows = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        int half = width / 2, lx = 6, rx = half + 6, w = half - 14;
+        int ly = top + 3, ry = top + 3;
+        SbCalendar.SbTime sb = SbCalendar.at(now);
+        gx.t("SKYBLOCK TIME", lx, ly, AMBER);
+        ly += LH;
+        gx.t(sb.toString(), lx, ly, WHITE);
+        ly += LH + 4;
+        World.Election el = World.election;
+        gx.t("MAYOR", lx, ly, AMBER);
+        ly += LH;
+        if (el == null) {
+            gx.t("Loading from Hypixel...", lx, ly, GRAY);
+            ly += LH;
+        } else {
+            World.Mayor m = el.mayor();
+            gx.t(gx.fit(m.name() + "  (" + m.key() + ")" + (m.ministerName().isEmpty() ? "" : "   minister " + m.ministerName()), w), lx, ly, YELLOW);
+            ly += LH;
+            for (World.Perk p : m.perks()) {
+                gx.t(gx.fit(p.name() + ": " + p.description(), w), lx + 6, ly, WHITE);
+                ly += LH;
+            }
+            if (m.ministerPerk() != null) {
+                gx.t(gx.fit(m.ministerPerk().name() + ": " + m.ministerPerk().description(), w), lx + 6, ly, GRAY);
+                ly += LH;
+            }
+            java.util.Set<String> boosted = World.boostedSectors(el);
+            if (!boosted.isEmpty()) {
+                List<Sectors.Stat> st = Sectors.stats(Feed.snapshot.products().values(), id -> Feed.change(id, 86_400_000L), id -> Feed.change(id, 3_600_000L), Terminal.CONFIG.minWeekVolume);
+                StringBuilder sb2 = new StringBuilder("Perks lean on: ");
+                for (String b : boosted) {
+                    sb2.append(b);
+                    for (Sectors.Stat s : st) if (s.name().equals(b)) sb2.append(' ').append(Fmt.pct(s.chg24()));
+                    sb2.append("   ");
+                }
+                gx.t(gx.fit(sb2.toString(), w), lx + 6, ly, AMBER_DIM);
+                ly += LH;
+            }
+            ly += 4;
+            gx.t("ELECTION  year " + el.voteYear() + (el.candidates().isEmpty() ? "" : "  (votes so far)"), lx, ly, AMBER);
+            ly += LH;
+            double total = 0;
+            for (World.Candidate c : el.candidates()) total += c.votes();
+            List<World.Candidate> cs = new ArrayList<>(el.candidates());
+            cs.sort(Comparator.comparingDouble(World.Candidate::votes).reversed());
+            double lead = total > 0 && !cs.isEmpty() ? cs.get(0).votes() / total * 100 : 0;
+            for (World.Candidate c : cs) {
+                double pct = total > 0 ? c.votes() / total * 100 : 0;
+                int bw = (int) ((w - 90) * pct / 100);
+                gx.fill(lx + 80, ly, lx + 80 + Math.max(1, bw), ly + LH - 3, pct == lead ? 0xFF8A6A12 : 0xFF2A2A2A);
+                gx.t(c.name() + " (" + c.key() + ")", lx + 6, ly, WHITE);
+                gx.tr(String.format(Locale.US, "%.1f%%", pct), lx + w, ly, GRAY);
+                ly += LH;
+            }
+            if (cs.isEmpty()) { gx.t("No election running right now.", lx + 6, ly, GRAY); ly += LH; }
+        }
+        gx.t("EVENTS", rx, ry, AMBER);
+        ry += LH;
+        for (SbCalendar.Upcoming u : SbCalendar.upcoming(now)) {
+            if (ry > bottom - 8 * LH) break;
+            gx.t(gx.fit(u.event().name(), (int) (w * 0.52)), rx, ry, u.active() ? GREEN : WHITE);
+            gx.tr(u.active() ? "NOW" : "in " + until(u.inMs()), rx + w, ry, u.active() ? GREEN : GRAY);
+            ry += LH;
+        }
+        ry += 4;
+        gx.t("HYPIXEL NEWS", rx, ry, AMBER);
+        ry += LH;
+        List<World.NewsItem> news = World.news;
+        if (news.isEmpty()) gx.t("No news loaded yet.", rx, ry, GRAY);
+        for (int i = 0; i < Math.min(news.size(), 6); i++) {
+            World.NewsItem n = news.get(i);
+            if (ry > bottom - 3 * LH) break;
+            boolean hover = mx >= rx && mx < rx + w && my >= ry - 1 && my < ry + 2 * LH - 1;
+            if (hover) gx.fill(rx - 2, ry - 1, rx + w + 2, ry + 2 * LH - 3, HOVER);
+            gx.t(gx.fit(n.title(), w), rx, ry, hover ? AMBER : WHITE);
+            gx.t(gx.fit(n.text(), w), rx + 6, ry + LH, DIM);
+            String link = n.link();
+            hits.add(new Hit(rx - 2, ry - 1, rx + w + 2, ry + 2 * LH - 3, () -> { Minecraft.getInstance().keyboardHandler.setClipboard(link); status("Link copied: " + link, GREEN); }));
+            ry += 2 * LH + 1;
+        }
+        int ny = bottom - 3 * LH;
+        gx.hline(6, width - 6, ny - 2, LINE);
+        gx.t(gx.fit("Event starts follow community calendar sources (durations about 3 SkyBlock days). Perk-to-sector links are keyword guesses. The learning model sees event closeness and whether the mayor leans on an item's sector.", width - 12), 6, ny, DIM);
+        gx.t("Click a news item to copy its link.", 6, ny + LH, DIM);
+    }
+
+    // ---------- ML: the learning model ----------
+
+    private void drawMl(int top, int bottom, int mx, int my) {
+        rows = new ArrayList<>();
+        Model m = Learner.MODEL;
+        int y = top + 4;
+        boolean ok = m.trusted();
+        gx.t("STATUS", 6, y, AMBER);
+        gx.t(gx.fit(m.status(), width - 70), 66, y, ok ? GREEN : YELLOW);
+        y += LH + 4;
+        int x = 6;
+        x = pair("SAMPLES ", Fmt.qty(m.n), x, y, WHITE);
+        x = pair("SKILL ", String.format(Locale.US, "%+.3f", m.skill()), x, y, changeColor(m.skill() - Model.MIN_SKILL));
+        x = pair("DIRECTION RIGHT ", String.format(Locale.US, "%.0f%%", m.dirAcc * 100), x, y, m.dirAcc >= Model.MIN_DIR ? GREEN : GRAY);
+        x = pair("ERROR vs NO-MOVE ", String.format(Locale.US, "%.2f vs %.2f", m.maeModel, m.maeZero), x, y, WHITE);
+        y += LH + 2;
+        x = 6;
+        x = pair("WARM START ", Learner.warmDone + "/" + Learner.warmTotal + " items (" + Fmt.qty(Learner.warmTrained) + " samples)", x, y, GRAY);
+        x = pair("LIVE ", Fmt.qty(Learner.liveTrained) + " learned, " + Learner.pending() + " waiting for their 4h result", x, y, GRAY);
+        y += LH + 6;
+        gx.t("WHAT IT LEARNED (share of the weight, + pushes the 4h forecast up)", 6, y, AMBER);
+        y += LH + 2;
+        double[] imp = m.importance();
+        int barX = 6 + (int) (width * 0.24), barMax = (int) (width * 0.35);
+        for (int i = 0; i < imp.length; i++) {
+            if (y > bottom - 5 * LH) break;
+            double wgt = m.weight(i);
+            gx.t(Features.NAMES[i], 6, y, WHITE);
+            int bw = (int) (barMax * Math.min(1, imp[i] * 2.5));
+            gx.fill(barX, y, barX + Math.max(1, bw), y + LH - 3, wgt >= 0 ? 0xFF1E7A33 : 0xFF8A2222);
+            gx.t(String.format(Locale.US, "%.0f%%  %s", imp[i] * 100, wgt >= 0 ? "+" : "-"), barX + barMax + 8, y, GRAY);
+            y += LH;
+        }
+        int ny = bottom - 4 * LH;
+        gx.hline(6, width - 6, ny - 2, LINE);
+        String[] notes = {
+                "It predicts the % move over the next 4 hours from cheapness vs fair value, volatility, spread, recent moves, time of day, event closeness and the mayor.",
+                "Every sample first TESTS the model (predict, then learn), so skill is measured on data it had not seen. Skill above 0 = better than guessing no move.",
+                "ALGO only uses it once it has 1000+ samples, positive skill and over 52% direction. Until then the ML column stays grey and changes nothing.",
+                "It saves to config/sbterminal-model.json and keeps learning every session. Real markets are noisy: expect small skill, and treat it as one input."};
+        for (int i = 0; i < notes.length; i++) gx.t(gx.fit(notes[i], width - 12), 6, ny + i * LH, i == 2 ? YELLOW : DIM);
     }
 
     // ---------- order health strip ----------
@@ -1229,6 +1375,8 @@ public final class TerminalScreen extends Screen {
                 {"POS coal 500 130.5", "set a position by hand (units 0 removes it)"},
                 {"ALERT coal < 120", "alert once in chat (also BID ASK SPR CHG1H). ALRT lists them"},
                 {"PNL / SECT", "P&L history / sector index moves"},
+                {"NEWS", "mayor and perks, election, the SkyBlock event calendar and Hypixel news (also CAL, MAYOR)"},
+                {"ML", "the learning model: samples, out-of-sample skill, what it learned. ALGO only uses it once it beats guessing no move"},
                 {"ALGO / F10", "trading model: market-making signals, fair value, risk-adjusted profit/h and size. Signals only, you place the orders"},
                 {"BT coal", "backtest the mean-reversion rule on years of daily history (fixed rule, no fitting, optimistic fills)"},
                 {"FLIP / F8", "flip finder: best flips by estimated profit per hour. Risky rows (!) hidden by default"},
@@ -1527,6 +1675,8 @@ public final class TerminalScreen extends Screen {
             case "PORT" -> go(View.PORT, null);
             case "FLIP" -> go(View.FLIP, null);
             case "ALGO" -> go(View.ALGO, null);
+            case "NEWS" -> go(View.NEWS, null);
+            case "ML" -> go(View.ML, null);
             case "LIST" -> cycleList();
             case "BUY" -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; }
             case "SELL" -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; }
@@ -1701,6 +1851,8 @@ public final class TerminalScreen extends Screen {
             case FLIP -> flipCommand(c.item());
             case BIND -> bindCommand(c.item());
             case ALGO -> go(View.ALGO, null);
+            case NEWS -> go(View.NEWS, null);
+            case ML -> go(View.ML, null);
             case BT -> backtestCommand(c.item());
             case LIST -> listCommand(c.item());
             case NOTIFY -> notifyCommand(c.item());

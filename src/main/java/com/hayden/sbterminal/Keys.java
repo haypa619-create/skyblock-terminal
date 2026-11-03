@@ -23,6 +23,8 @@ public final class Keys {
         DEFAULTS.put("FLIP", 297);
         DEFAULTS.put("LIST", 298);
         DEFAULTS.put("ALGO", 299);
+        DEFAULTS.put("NEWS", -1);
+        DEFAULTS.put("ML", -1);
     }
 
     private Keys() {}
