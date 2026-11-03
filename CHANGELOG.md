@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.8
+
+- The "n/a" in the 24h column is fixed. History used to load only for the 200 busiest items, so everything else showed n/a. Now any item that is on screen (Monitor, sector and screener rows, search dropdown) loads its own 24h history, showing "..." while it loads. The search dropdown waits until you stop typing for a moment so it doesn't fire a request per keystroke.
+- A price alert on CHG1H loads the history it needs.
+
 ## 0.5.7
 
 - Claim from the portfolio: filled orders get a green CLAIM button, and clicking the row (or "claim it") now starts a guide instead of opening the item. It runs /bz, lights up Manage Orders, then the filled order. Clicking that order in Hypixel's menu claims it. "Claim all" in the toolbar does every filled order in turn and stops when none are left.

@@ -180,6 +180,7 @@ public final class Terminal implements ClientModInitializer {
         for (Alerts.Rule r : CONFIG.priceAlerts) {
             if (r.fired) continue;
             Market.Product p = Feed.snapshot.get(r.id);
+            if (r.f() == Alerts.Field.CHG1H) Feed.day(r.id);
             double x = Alerts.value(r.f(), p, Feed.change(r.id, 3_600_000L));
             if (!Alerts.test(r.op, x, r.value)) continue;
             r.fired = true;

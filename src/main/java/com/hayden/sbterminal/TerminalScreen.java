@@ -483,6 +483,7 @@ public final class TerminalScreen extends Screen {
         long now = System.currentTimeMillis();
         for (int i = scroll; i < Math.min(ids.size(), scroll + fit); i++) {
             String id = ids.get(i);
+            Feed.day(id); // items outside the background top-200 load their history when they are on screen
             int y = y0 + (i - scroll) * LH;
             Market.Product p = s.get(id);
             int idx = i;
@@ -842,6 +843,7 @@ public final class TerminalScreen extends Screen {
             out.addAll(f.subList(0, Math.min(8, f.size())));
         }
         suggest = out;
+        suggestChangedAt = System.currentTimeMillis();
     }
 
     private static final java.util.regex.Pattern ALERT_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+(?:BID|ASK|SPR|CHG1H|PX|PRICE|MID)\\b.*|\\s*[<>].*)?$");
@@ -854,8 +856,12 @@ public final class TerminalScreen extends Screen {
         return new String[]{m.group(1).trim(), m.group(2) == null ? "" : m.group(2)};
     }
 
+    private long suggestChangedAt = 0;
+
     private void drawSuggestions(int mx, int my) {
         if (suggest.isEmpty()) return;
+        // Once the list stops changing for a moment, load 24h history for the shown items so the change column fills in.
+        boolean settled = System.currentTimeMillis() - suggestChangedAt > 300;
         int x = 4, y = 29, w = Math.min(width - 8, Math.max(320, (int) (width * 0.6)));
         int h = suggest.size() * LH + 6;
         gx.fill(x, y, x + w, y + h, 0xF5101010);
@@ -879,8 +885,9 @@ public final class TerminalScreen extends Screen {
             gx.t(gx.fit(s, (int) (w * 0.25)), x + (int) (w * 0.45), ry, on ? BLACK : DIM);
             if (p != null) {
                 gx.tr(Fmt.px(p.mid()), x + (int) (w * 0.86), ry, fg);
+                if (settled) Feed.day(s);
                 double c = Feed.change(s, 86_400_000L);
-                gx.tr(Fmt.pct(c), x + w - 6, ry, on ? BLACK : changeColor(c));
+                gx.tr(Double.isFinite(c) || !Feed.loading(s) ? Fmt.pct(c) : "...", x + w - 6, ry, on ? BLACK : changeColor(c));
             }
         }
     }
