@@ -304,11 +304,11 @@ public final class TerminalScreen extends Screen {
         x = cap("F2", "MON", YELLOW, x, y);
         x = cap("F3", "MOV", YELLOW, x, y);
         x = cap("F4", "SCR", YELLOW, x, y);
+        x = cap("F7", "PORT", YELLOW, x, y);
         if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y); x = cap("F6", "SELL", RED, x, y); cap("←→", "range", GRAY, x, y); }
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
         else if (view == View.SCR) cap("←→", "sort", GRAY, x, y);
         else if (view == View.MON) cap("Shift↑↓", "move", GRAY, x, y);
-        if (view != View.ITEM) cap("F7", "PORT", YELLOW, x + 0, y); 
         String bf = Feed.backfillStatus();
         if (!bf.isEmpty()) gx.tr(bf, width - 4, y + 3, DIM);
     }
@@ -334,7 +334,7 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Sell now", () -> { tSide = Ticket.Side.SELL; placeTicket(true); }));
                 a.add(new Action(on ? "Remove from MON" : "Add to MON", () -> toggleWatch(item)));
                 a.add(new Action("Copy price", () -> copyPrice(tSide == Ticket.Side.BUY)));
-                a.add(new Action("Alert", () -> { cmd = "ALERT " + Feed.name(item) + " < "; status("Type the price and press Enter (or BID/ASK/SPR/CHG1H before the < or >)", GRAY); }));
+                a.add(new Action("Alert", () -> { cmd = "ALERT " + Feed.name(item) + " < "; status("Type the price, then Enter", GRAY); }));
                 a.add(new Action(cmpItem == null ? "Compare" : "Stop compare", () -> {
                     if (cmpItem != null) cmpItem = null;
                     else { cmd = "CMP "; status("Type the item to compare with and press Enter", GRAY); }
@@ -1277,7 +1277,7 @@ public final class TerminalScreen extends Screen {
         Guide.launch(new Ticket.Active(id, o.name, side, Ticket.Mode.CANCEL, price, left, System.currentTimeMillis(), o.price));
     }
 
-    private static String signed(double v) { return (v >= 0 ? "+" : "-") + Fmt.px(Math.abs(v)); }
+    private static String signed(double v) { return Math.abs(v) < 0.05 ? "0" : (v >= 0 ? "+" : "-") + Fmt.px(Math.abs(v)); }
 
     // ---------- LIMIT ----------
 
@@ -1801,7 +1801,7 @@ public final class TerminalScreen extends Screen {
         double total = (buy ? qty : Math.max(1, Guide.carrying(item))) * px;
         gx.t(buy ? "TOTAL" : "PROCEEDS", x + 5, ry, AMBER_DIM);
         String pct = buy && Terminal.purse > 0 ? String.format(Locale.US, "  %.0f%% of purse", total / Terminal.purse * 100) : "";
-        gx.tr(Fmt.px(total) + pct, x + w - 5, ry, WHITE);
+        gx.tr(Fmt.px(total) + pct, x + w - 5, ry, buy && Terminal.purse > 0 && total > Terminal.purse ? RED : WHITE);
         ry += LH + 1;
         double tax = 1 - Terminal.CONFIG.taxPct / 100.0;
         if (buy) {
@@ -1874,6 +1874,7 @@ public final class TerminalScreen extends Screen {
             while (back.size() > 40) back.removeLast();
         }
         view = v;
+        status = "";
         if (id != null) item = id;
         sel = 0;
         scroll = 0;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- Fixed the F7 PORT footer key overlapping the view hints.
+- Status messages clear when you switch screens.
+- Empty P&L figures show 0 instead of +-.
+- The ticket total turns red when it is more than your purse.
+
 ## 0.5.1
 
 - Daily limit rebuilt, nothing hardcoded. The cap comes from LIMIT <amount>, or is learned from Hypixel's "reached the daily limit" message (saved as an estimate, shown with ~). Until then 15B is only displayed, never enforced.
