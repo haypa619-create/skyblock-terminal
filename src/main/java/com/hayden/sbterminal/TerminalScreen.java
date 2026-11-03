@@ -322,16 +322,16 @@ public final class TerminalScreen extends Screen {
         x = cap("GO", "Enter", GREEN, x, y, this::enter);
         x = cap("ESC", "close", AMBER, x, y, this::escape);
         x = cap("BKSP", "back", GRAY, x, y, this::goBack);
-        x = cap("F1", "HELP", YELLOW, x, y, () -> go(View.HELP, null));
-        x = cap("F2", "MON", YELLOW, x, y, () -> go(View.MON, null));
-        x = cap("F3", "MOV", YELLOW, x, y, () -> go(View.MOV, null));
-        x = cap("F4", "SCR", YELLOW, x, y, () -> go(View.SCR, null));
-        x = cap("F7", "PORT", YELLOW, x, y, () -> go(View.PORT, null));
-        x = cap("F8", "FLIP", YELLOW, x, y, () -> go(View.FLIP, null));
-        if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap("F6", "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y); }
+        x = cap(keyLabel("HELP"), "HELP", YELLOW, x, y, () -> go(View.HELP, null));
+        x = cap(keyLabel("MON"), "MON", YELLOW, x, y, () -> go(View.MON, null));
+        x = cap(keyLabel("MOV"), "MOV", YELLOW, x, y, () -> go(View.MOV, null));
+        x = cap(keyLabel("SCR"), "SCR", YELLOW, x, y, () -> go(View.SCR, null));
+        x = cap(keyLabel("PORT"), "PORT", YELLOW, x, y, () -> go(View.PORT, null));
+        x = cap(keyLabel("FLIP"), "FLIP", YELLOW, x, y, () -> go(View.FLIP, null));
+        if (view == View.ITEM) { x = cap(keyLabel("BUY"), "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap(keyLabel("SELL"), "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y); }
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
         else if (view == View.SCR || view == View.FLIP) cap("←→", "sort", GRAY, x, y);
-        else if (view == View.MON) { x = cap("Shift↑↓", "move", GRAY, x, y); cap("F9", "LIST", YELLOW, x, y, this::cycleList); }
+        else if (view == View.MON) { x = cap("Shift↑↓", "move", GRAY, x, y); cap(keyLabel("LIST"), "LIST", YELLOW, x, y, this::cycleList); }
         String bf = Feed.backfillStatus();
         if (!bf.isEmpty()) gx.tr(bf, width - 4, y + 3, DIM);
     }
@@ -1052,8 +1052,8 @@ public final class TerminalScreen extends Screen {
                 {"typing", "matches show as you type; Up/Down pick, Tab or Enter opens"},
                 {"Up / Down, Enter", "pick a row, open it. Click works too. Shift+Up/Down moves a Monitor row"},
                 {"Left / Right", "chart range, movers window, screener sort"},
-                {"F1 F2 F3 F4", "HELP, MON, MOV, SCR"},
-                {"F7 F8 F9", "PORT, FLIP, next Monitor list"},
+                {"F1 F2 F3 F4", "HELP, MON, MOV, SCR (defaults; F7 PORT, F8 FLIP, F9 next list, F5/F6 buy/sell tab)"},
+                {"BIND FLIP", "set your own hotkeys: BIND FLIP then press a key (or BIND FLIP F6). BIND alone lists them, BIND RESET restores"},
                 {"Ctrl+V", "paste into the command line"},
                 {"Esc", "clear what you typed, then close the terminal (one press from any screen)"},
                 {"Backspace", "on an empty line: go back one screen"},
@@ -1264,6 +1264,20 @@ public final class TerminalScreen extends Screen {
         int k = e.key();
         if (keyDebug) status("key " + k + " received, " + Minecraft.getInstance().getFps() + " fps", AMBER);
         boolean dropdown = !suggest.isEmpty();
+        if (capturing != null) { // BIND: the next key press becomes the binding
+            if (k == 256) { capturing = null; status("Binding cancelled", GRAY); return true; }
+            if (k >= 340 && k <= 347) return true; // just a modifier
+            int code = Keys.code(k, e.hasControlDown(), e.hasAltDown());
+            if (!Keys.bindable(code)) { status(Keys.name(code) + " can't be used: pick an F-key, or Ctrl/Alt + a letter or number", RED); return true; }
+            String act = capturing;
+            capturing = null;
+            bindKey(act, code);
+            return true;
+        }
+        if (!(e.hasControlDown() && k == 86)) {
+            String act = Keys.resolve(Terminal.CONFIG.keys, Keys.code(k, e.hasControlDown(), e.hasAltDown()));
+            if (act != null) { runKey(act); return true; }
+        }
         if (e.hasControlDown() && k == 86) { // Ctrl+V
             String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
             if (clip != null) { cmd += clip.replaceAll("[\\r\\n]", " ").trim(); updateSuggestions(); }
@@ -1292,17 +1306,56 @@ public final class TerminalScreen extends Screen {
             case 269 -> { sel = Math.max(0, rows.size() - 1); return true; }
             case 263, 262 -> { horizontal(k == 262 ? 1 : -1); return true; }
             case 261 -> { if (view == View.MON || view == View.PORT) removeSelected(); else if (view == View.ALRT) deleteAlert(); return true; }
-            case 290 -> { go(View.HELP, null); return true; }
-            case 291 -> { go(View.MON, null); return true; }
-            case 292 -> { go(View.MOV, null); return true; }
-            case 293 -> { go(View.SCR, null); return true; }
-            case 296 -> { go(View.PORT, null); return true; }
-            case 297 -> { go(View.FLIP, null); return true; }
-            case 298 -> { cycleList(); return true; }
-            case 294 -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; return true; }
-            case 295 -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; return true; }
             default -> { return super.keyPressed(e); }
         }
+    }
+
+    /** BIND: action waiting for its key press, or null. */
+    private static String capturing = null;
+
+    private void runKey(String act) {
+        switch (act) {
+            case "HELP" -> go(View.HELP, null);
+            case "MON" -> go(View.MON, null);
+            case "MOV" -> go(View.MOV, null);
+            case "SCR" -> go(View.SCR, null);
+            case "PORT" -> go(View.PORT, null);
+            case "FLIP" -> go(View.FLIP, null);
+            case "LIST" -> cycleList();
+            case "BUY" -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; }
+            case "SELL" -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; }
+            default -> {}
+        }
+    }
+
+    private String keyLabel(String act) {
+        return Keys.name(Keys.of(Terminal.CONFIG.keys, act));
+    }
+
+    private void bindKey(String act, int code) {
+        String other = Keys.resolve(Terminal.CONFIG.keys, code);
+        if (other != null && !other.equals(act)) {
+            Terminal.CONFIG.keys.put(other, -1); // taken: that action loses it
+            status(Keys.name(code) + " moved from " + other + " to " + act + ". BIND " + other + " gives it a new key.", YELLOW);
+        } else status(act + " is now " + Keys.name(code), GREEN);
+        Terminal.CONFIG.keys.put(act, code);
+        Terminal.CONFIG.save();
+    }
+
+    private void bindCommand(String arg) {
+        String[] w = arg == null || arg.isBlank() ? new String[0] : arg.trim().split("\\s+", 2);
+        if (w.length == 0) {
+            StringBuilder sb = new StringBuilder();
+            for (String a : Keys.DEFAULTS.keySet()) sb.append(a).append(' ').append(keyLabel(a)).append("   ");
+            status(sb + "| BIND FLIP then press a key, or BIND FLIP F6", AMBER);
+            return;
+        }
+        if (w[0].equals("RESET")) { Terminal.CONFIG.keys.clear(); Terminal.CONFIG.save(); status("Hotkeys back to the defaults", GREEN); return; }
+        if (!Keys.DEFAULTS.containsKey(w[0])) { status("Hotkeys: " + String.join(" ", Keys.DEFAULTS.keySet()) + ", or RESET", RED); return; }
+        if (w.length == 1) { capturing = w[0]; status("Press the key for " + w[0] + " now (F-key, or Ctrl/Alt + letter). Esc cancels.", YELLOW); return; }
+        int code = Keys.parse(w[1]);
+        if (code < 0) { status("Use an F-key (F6) or Ctrl/Alt + a letter or number (CTRL+G)", RED); return; }
+        bindKey(w[0], code);
     }
 
     private void enter() {
@@ -1417,6 +1470,7 @@ public final class TerminalScreen extends Screen {
             }
             case PORT -> go(View.PORT, null);
             case FLIP -> flipCommand(c.item());
+            case BIND -> bindCommand(c.item());
             case LIST -> listCommand(c.item());
             case NOTIFY -> notifyCommand(c.item());
             case BB -> {

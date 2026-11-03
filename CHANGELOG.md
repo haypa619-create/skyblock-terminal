@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.2
+- BIND: set your own hotkeys. BIND FLIP then press a key, or BIND FLIP F6 / CTRL+G. BIND alone lists them, BIND RESET restores defaults. Footer keys show your bindings. Actions: HELP MON MOV SCR BUY SELL PORT FLIP LIST.
+
 ## 0.7.1
 - Flip finder respects one inventory: units per hour in EST/H are capped at 36 slots x 64 (FLIP SLOTS n changes it), and items under 1k are skipped (FLIP MIN 5k changes it, or the Min price button).
 

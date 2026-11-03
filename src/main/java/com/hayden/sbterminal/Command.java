@@ -16,7 +16,7 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, FLIP, LIST, NOTIFY, BB, ITEM, EMPTY }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, FLIP, LIST, NOTIFY, BB, BIND, ITEM, EMPTY }
 
     /** Function codes, for the autocomplete dropdown. */
     public static final String[][] CODES = {
@@ -30,7 +30,7 @@ public final class Command {
             {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"},
             {"FLIP", "Flip finder. FLIP MIN 5k = cheapest item, FLIP SLOTS 36 = inventory size"},
             {"LIST", "LIST mining: switch or create a Monitor list (LIST alone cycles)"},
-            {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"BB", "Bollinger bands on the chart on/off"}};
+            {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"BB", "Bollinger bands on the chart on/off"}, {"BIND", "BIND FLIP, BIND FLIP F6, BIND RESET: set your hotkeys"}};
     public enum Range {
         H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L),
         M1("1M", 30 * 86_400_000L), M3("3M", 90 * 86_400_000L);
@@ -70,6 +70,7 @@ public final class Command {
             }
             case "KEYS" -> { return simple(Fn.KEYS); }
             case "FLIP", "FLIPS" -> { return new Parsed(Fn.FLIP, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }
+            case "BIND", "KEYMAP", "HOTKEYS" -> { return new Parsed(Fn.BIND, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }
             case "BB", "BOLL" -> { return simple(Fn.BB); }
             case "LIST", "LISTS" -> { return new Parsed(Fn.LIST, s.substring(w[0].length()).trim(), null, null, List.of(), null); }
             case "NOTIFY", "NOTIF" -> { return new Parsed(Fn.NOTIFY, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }

@@ -50,6 +50,8 @@ public final class Config {
     public boolean flipRisky = false;
     /** Flip finder: one inventory (36 slots x 64) is the most you can hold, and items cheaper than flipMinPrice are skipped. */
     public double flipInvUnits = 2304, flipMinPrice = 1000;
+    /** Hotkeys you changed (action -> code, see Keys). Anything missing uses the default. */
+    public java.util.Map<String, Integer> keys = new java.util.LinkedHashMap<>();
     /** Chart: Bollinger bands (20 points, 2 sigma). */
     public boolean bollinger = false;
     /** Where you were, so the terminal reopens there. */
@@ -69,6 +71,7 @@ public final class Config {
         if (c == null) c = new Config();
         if (c.watchlist == null) c.watchlist = new ArrayList<>();
         if (c.priceAlerts == null) c.priceAlerts = new ArrayList<>();
+        if (c.keys == null) c.keys = new java.util.LinkedHashMap<>();
         if (c.lists == null) c.lists = new java.util.LinkedHashMap<>();
         if (c.activeList == null || (!c.activeList.equals("MAIN") && !c.lists.containsKey(c.activeList))) c.activeList = "MAIN";
         if (c.soundGood == null) c.soundGood = "PLING";
