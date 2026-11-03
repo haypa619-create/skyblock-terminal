@@ -16,8 +16,19 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, ITEM, EMPTY }
-    public enum Range { H1, D1, W1 }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, ITEM, EMPTY }
+
+    /** Function codes, for the autocomplete dropdown. */
+    public static final String[][] CODES = {
+            {"MON", "Monitor (your watchlist)"}, {"MOV", "Movers"}, {"SCR", "Screener"}, {"HELP", "Commands and keys"},
+            {"ADD", "Add an item to your Monitor"}, {"DEL", "Remove an item from your Monitor"},
+            {"FONT", "FONT MONO or FONT MC"}};
+    public enum Range {
+        H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L);
+        public final String label;
+        public final long span;
+        Range(String label, long span) { this.label = label; this.span = span; }
+    }
 
     public record Parsed(Fn fn, String item, String view, Range range, List<Screener.Filter> filters, String error) {}
 
@@ -34,6 +45,7 @@ public final class Command {
             case "MON", "W", "WATCH" -> { return simple(Fn.MON); }
             case "MOV", "MOST", "TOP" -> { return simple(Fn.MOV); }
             case "HELP", "?" -> { return simple(Fn.HELP); }
+            case "FONT" -> { return new Parsed(Fn.FONT, w.length > 1 ? w[1].toUpperCase(Locale.US) : "", null, null, List.of(), null); }
             case "SCR", "EQS", "SCREEN" -> {
                 List<Screener.Filter> fs = new ArrayList<>();
                 for (int i = 1; i < w.length; i++) {
@@ -68,7 +80,9 @@ public final class Command {
     static Range rangeOf(String t) {
         return switch (t) {
             case "1H" -> Range.H1;
+            case "6H" -> Range.H6;
             case "1D", "24H" -> Range.D1;
+            case "3D" -> Range.D3;
             case "1W", "7D" -> Range.W1;
             default -> null;
         };

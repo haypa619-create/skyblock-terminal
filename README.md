@@ -11,11 +11,23 @@ Type into the command line at the top and press Enter.
 | Command | What it shows |
 |---|---|
 | `radar` | Item page: live bid / ask / spread, 1h / 24h / 7d change, a price chart (1H, 1D, 1W), the 30-deep order book, and stats (weekly insta-buys and insta-sells, coin flow, orders on each side, buy/sell pressure). Any part of a name works, or initials (`ec` = Enchanted Coal). |
-| `radar GP 1W` | Same, with the chart range set. Ranges: `1H` `1D` `1W`. |
+| `radar 1W` | Same, with the chart range set. Ranges: `1H` `6H` `1D` `3D` `1W`. |
 | `MON` | Monitor: your watchlist, live. `ADD radar` / `DEL radar`, or F5 on an item page. |
 | `MOV` | Movers: biggest gainers and losers over 24h or 1h (Left/Right), among items that actually trade. |
 | `SCR VOL>50K SPR>3 PX<1M CHG<-5` | Screener over every Bazaar item. Fields: `VOL` weekly units, `FLOW` coins per day, `PX` price, `SPR` spread %, `CHG` 24h %, `CHG1H` 1h %, `ORD` orders. Left/Right changes the sort. |
 | `HELP` | Commands and keys. |
+
+## Look
+
+Everything is drawn by the mod in a terminal style: black background, amber command line, a numbered dark-red toolbar on each screen (type the number and press Enter, or click), green/red price flashes, colored key caps. Text uses a bundled monospace font, IBM Plex Mono (SIL Open Font License, see `assets/sbterminal/font/OFL-IBM-Plex-Mono.txt`). `FONT MC` switches to Minecraft's font.
+
+## Shortcuts
+
+- **Search as you type:** matching items appear under the command line with live price and 24h change. Up/Down, then Tab or Enter.
+- **Hover + B:** point at an item in any menu or your inventory and press B to open it in the terminal.
+- **`/sbt radar`** from chat opens the terminal on an item.
+- **Copy price:** on an item page, toolbar actions copy best bid + 0.1 or best ask - 0.1 for Hypixel's price sign.
+- **Sort:** click a column header (again to reverse). Shift+Up/Down moves a Monitor row.
 
 ## Keys
 

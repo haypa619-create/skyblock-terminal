@@ -1,0 +1,13 @@
+{
+  "providers": [
+    {
+      "type": "ttf",
+      "file": "sbterminal:plexmono.ttf",
+      "shift": [0.0, 1.0],
+      "size": 8.0,
+      "oversample": 4.0,
+      "skip": ""
+    },
+    { "type": "reference", "id": "minecraft:include/default" }
+  ]
+}

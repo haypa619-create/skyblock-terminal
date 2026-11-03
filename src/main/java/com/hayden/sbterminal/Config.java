@@ -16,6 +16,10 @@ public final class Config {
     public double minWeekVolume = 10_000;
     /** Seconds between live price checks while the terminal is open / closed. */
     public int pollOpenSecs = 5, pollClosedSecs = 20;
+    /** Terminal font: true = bundled monospace (IBM Plex Mono), false = Minecraft's. */
+    public boolean monoFont = true;
+    /** Where you were, so the terminal reopens there. */
+    public String lastView = "MON", lastItem = null, lastRange = "D1";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private transient Path file;
