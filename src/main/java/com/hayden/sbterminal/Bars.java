@@ -19,9 +19,18 @@ import java.util.List;
  * Coflnet "buy" is the insta-buy price (= best ask) and "sell" the insta-sell price (= best bid).
  */
 public final class Bars {
-    public record Point(long time, double bid, double ask, double bidLow, double bidHigh, double askLow, double askHigh) {
+    /**
+     * bookBid/bookAsk: units waiting in buy orders / sell offers; flowBuy/flowSell: units insta-bought / insta-sold over the
+     * last week (0 when the source does not say).
+     */
+    public record Point(long time, double bid, double ask, double bidLow, double bidHigh, double askLow, double askHigh,
+                        double bookBid, double bookAsk, double flowBuy, double flowSell) {
         public Point(long time, double bid, double ask) {
             this(time, bid, ask, bid, bid, ask, ask);
+        }
+
+        public Point(long time, double bid, double ask, double bidLow, double bidHigh, double askLow, double askHigh) {
+            this(time, bid, ask, bidLow, bidHigh, askLow, askHigh, 0, 0, 0, 0);
         }
 
         public double mid() {
@@ -47,7 +56,8 @@ public final class Bars {
             double ask = Market.num(o, "buy"), bid = Market.num(o, "sell");
             out.add(new Point(t, bid, ask,
                     orElse(Market.num(o, "minSell"), bid), orElse(Market.num(o, "maxSell"), bid),
-                    orElse(Market.num(o, "minBuy"), ask), orElse(Market.num(o, "maxBuy"), ask)));
+                    orElse(Market.num(o, "minBuy"), ask), orElse(Market.num(o, "maxBuy"), ask),
+                    Market.num(o, "sellVolume"), Market.num(o, "buyVolume"), Market.num(o, "buyMovingWeek"), Market.num(o, "sellMovingWeek")));
         }
         out.sort(Comparator.comparingLong(Point::time));
         return out;

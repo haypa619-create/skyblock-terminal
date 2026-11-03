@@ -25,6 +25,8 @@ public final class Keys {
         DEFAULTS.put("ALGO", 299);
         DEFAULTS.put("NEWS", -1);
         DEFAULTS.put("ML", -1);
+        DEFAULTS.put("CRAFT", -1);
+        DEFAULTS.put("SEAS", -1);
     }
 
     private Keys() {}

@@ -12,15 +12,18 @@ import java.util.Map;
 public final class Deep {
     public static final String[] NAMES = {"cheap vs 10d fair (z)", "daily volatility", "spread %", "day range %", "1d move", "3d move", "7d move", "14d move", "30d move",
             "weekday (sin)", "weekday (cos)", "day of year (sin)", "day of year (cos)", "near Spooky", "near Jerry", "near Zoo", "near New Year",
-            "SkyBlock year phase (sin)", "SkyBlock year phase (cos)", "price level (log10)"};
+            "SkyBlock year phase (sin)", "SkyBlock year phase (cos)", "price level (log10)",
+            "order book: buy vs sell units", "flow: insta-buys vs insta-sells", "activity vs a week ago", "liquidity (log10 weekly units)"};
     public static final int F = NAMES.length;
-    public static final int HORIZON_DAYS = 3;
+    public static final int[] HORIZONS = {1, 3, 7};
+    public static final int MAX_H = 7;
     public static final double TAX_PCT = 1.25;
     static final long DAY = 86_400_000L;
 
     private Deep() {}
 
-    public record Sample(long time, String id, float[] x, float y) {}
+    /** y[k] = % mid move over HORIZONS[k] days (NaN when that day is missing). */
+    public record Sample(long time, String id, float[] x, float[] y) {}
 
     /** One calendar-day value per UTC day (the last point of that day), NaN-free arrays with a presence mask. */
     private record Daily(long day0, Bars.Point[] pts) {}
@@ -85,8 +88,18 @@ public final class Deep {
         x[17] = (float) Math.sin(2 * Math.PI * phase);
         x[18] = (float) Math.cos(2 * Math.PI * phase);
         x[19] = (float) Math.log10(mid);
+        Bars.Point p = a[i], w = a[i - 7];
+        if (p.bookBid() > 0 || p.bookAsk() > 0) x[20] = (float) clamp(Math.log((p.bookBid() + 1) / (p.bookAsk() + 1)), 5);
+        if (p.flowBuy() > 0 || p.flowSell() > 0) {
+            x[21] = (float) clamp(Math.log((p.flowBuy() + 1) / (p.flowSell() + 1)), 5);
+            double act = p.flowBuy() + p.flowSell();
+            if (w != null && w.flowBuy() + w.flowSell() > 0) x[22] = (float) clamp(Math.log((act + 1) / (w.flowBuy() + w.flowSell() + 1)), 3);
+            x[23] = (float) Math.log10(act + 1);
+        }
         return x;
     }
+
+    private static double clamp(double v, double m) { return Math.max(-m, Math.min(m, v)); }
 
     private static double[] ewma(Daily d, double halfLifeDays) {
         Bars.Point[] a = d.pts();
@@ -106,12 +119,19 @@ public final class Deep {
         if (d == null) return out;
         double[] ew = ewma(d, 10);
         Bars.Point[] a = d.pts();
-        for (int i = 31; i + HORIZON_DAYS < a.length; i++) {
-            if (a[i + HORIZON_DAYS] == null) continue;
+        for (int i = 31; i + 1 < a.length; i++) {
+            float[] y = new float[HORIZONS.length];
+            boolean any = false;
+            for (int k = 0; k < HORIZONS.length; k++) {
+                int j = i + HORIZONS[k];
+                if (j >= a.length || a[j] == null) { y[k] = Float.NaN; continue; }
+                y[k] = (float) clamp(Math.log(a[j].mid() / a[i].mid()) * 100, 30);
+                any = true;
+            }
+            if (!any) continue;
             float[] x = features(d, i, ew);
             if (x == null) continue;
-            double y = Math.log(a[i + HORIZON_DAYS].mid() / a[i].mid()) * 100;
-            out.add(new Sample((d.day0() + i) * DAY, id, x, (float) Math.max(-30, Math.min(30, y))));
+            out.add(new Sample((d.day0() + i) * DAY, id, x, y));
         }
         return out;
     }
@@ -128,76 +148,146 @@ public final class Deep {
         return null;
     }
 
-    // ---------- walk-forward ----------
+    // ---------- walk-forward with a locked holdout ----------
 
-    public record Fold(int year, int samples, double skill, double dirAcc, int trades, double avgNet, double winRate, double topDecileNet) {}
+    /** One test year: skill/direction of the forecast, and the trades the rule would have taken (net after tax). */
+    public record Fold(int year, int samples, double skill, double dirAcc, int trades, double avgNet, double winRate, double perDay) {}
 
-    public record Report(List<Fold> folds, int totalSamples, int items, long builtAt, boolean edge, String verdict, double[] importance) {}
-
-    /** @param threshold forecast (%) above which a long trade is taken */
-    public static Report walkForward(List<Sample> all, int items, double threshold, int nTrees, long now) {
-        List<Fold> folds = new ArrayList<>();
-        if (all.size() < 5000) return new Report(folds, all.size(), items, now, false, "Not enough history yet (" + all.size() + " samples)", new double[F]);
-        long minT = Long.MAX_VALUE, maxT = Long.MIN_VALUE;
-        for (Sample s : all) { minT = Math.min(minT, s.time()); maxT = Math.max(maxT, s.time()); }
-        int firstYear = java.time.Instant.ofEpochMilli(minT).atZone(java.time.ZoneOffset.UTC).getYear();
-        int lastYear = java.time.Instant.ofEpochMilli(maxT).atZone(java.time.ZoneOffset.UTC).getYear();
-        double wNet = 0;
-        int tradesAll = 0, positive = 0;
-        for (int year = firstYear + 2; year <= lastYear; year++) {
-            long from = java.time.LocalDate.of(year, 1, 1).toEpochDay() * DAY, to = java.time.LocalDate.of(year + 1, 1, 1).toEpochDay() * DAY;
-            List<Sample> train = new ArrayList<>(), test = new ArrayList<>();
-            for (Sample s : all) {
-                if (s.time() < from - (HORIZON_DAYS + 1) * DAY) train.add(s); // embargo: no label may peek into the test year
-                else if (s.time() >= from && s.time() < to) test.add(s);
-            }
-            if (train.size() < 3000 || test.size() < 500) continue;
-            Gbm g = fit(train, nTrees);
-            double se = 0, se0 = 0, dirHit = 0, dirN = 0, net = 0, wins = 0;
-            int trades = 0;
-            double[] preds = new double[test.size()];
-            for (int i = 0; i < test.size(); i++) {
-                Sample s = test.get(i);
-                double p = g.predict(s.x());
-                preds[i] = p;
-                se += (s.y() - p) * (s.y() - p);
-                se0 += s.y() * s.y();
-                if (Math.abs(p) > 0.05 && s.y() != 0) { dirN++; if (Math.signum(p) == Math.signum(s.y())) dirHit++; }
-                if (p > threshold) { trades++; double r = s.y() - TAX_PCT; net += r; if (r > 0) wins++; }
-            }
-            double[] sorted = preds.clone();
-            java.util.Arrays.sort(sorted);
-            double cut = sorted[(int) (sorted.length * 0.9)], top = 0;
-            int tn = 0;
-            for (int i = 0; i < test.size(); i++) if (preds[i] >= cut) { top += test.get(i).y() - TAX_PCT; tn++; }
-            Fold f = new Fold(year, test.size(), 1 - se / se0, dirN == 0 ? 0.5 : dirHit / dirN, trades, trades == 0 ? 0 : net / trades,
-                    trades == 0 ? 0 : wins / trades, tn == 0 ? 0 : top / tn);
-            folds.add(f);
-            wNet += net;
-            tradesAll += trades;
-            if (trades >= 30 && f.avgNet() > 0) positive++;
-        }
-        double avgNet = tradesAll == 0 ? 0 : wNet / tradesAll;
-        int tested = (int) folds.stream().filter(f -> f.trades() >= 30).count();
-        boolean edge = tested >= 2 && tradesAll >= 300 && avgNet > 0.2 && positive >= Math.ceil(tested * 0.6);
-        String verdict;
-        if (folds.isEmpty()) verdict = "Not enough years of history to test (need 3+ years across enough items)";
-        else if (edge) verdict = String.format("EDGE: %+.2f%% per trade after tax, positive in %d of %d test years (%d trades)", avgNet, positive, tested, tradesAll);
-        else verdict = String.format("NO EDGE: %+.2f%% per trade after tax, positive in %d of %d test years (%d trades). Not used for trading.", avgNet, positive, tested, tradesAll);
-        return new Report(folds, all.size(), items, now, edge, verdict, importance(all, nTrees));
+    /** rule THRESH = every forecast above tax + 0.25%; TOP5 = each day only the 5 best forecasts above the tax (one inventory). */
+    public record Config(int horizon, String rule) {
+        public String label() { return horizon + "d " + (rule.equals("TOP5") ? "best 5 a day" : "all above " + (TAX_PCT + 0.25) + "%"); }
     }
 
-    private static Gbm fit(List<Sample> train, int nTrees) {
-        int n = train.size();
+    public record ConfigScore(String label, int trades, double avgNet, double perDay, int positiveYears, int testedYears) {}
+
+    public record Report(String config, int horizon, List<Fold> folds, Fold holdout, List<ConfigScore> tried, int totalSamples, int items,
+                         long builtAt, boolean edge, String verdict, double[] importance) {}
+
+    private static int year(long t) { return java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneOffset.UTC).getYear(); }
+
+    private record Preds(int year, List<Sample> test, double[] p) {}
+
+    /**
+     * Validation years pick the best of 6 setups (3 horizons x 2 rules); the most recent year is a locked holdout that
+     * only the chosen setup is scored on, so choosing between setups cannot flatter the result.
+     */
+    public static Report walkForward(List<Sample> all, int items, int nTrees, long now) {
+        List<Fold> none = new ArrayList<>();
+        if (all.size() < 5000) return new Report("-", 0, none, null, List.of(), all.size(), items, now, false, "Not enough history yet (" + all.size() + " samples)", new double[F]);
+        long minT = Long.MAX_VALUE, maxT = Long.MIN_VALUE;
+        for (Sample s : all) { minT = Math.min(minT, s.time()); maxT = Math.max(maxT, s.time()); }
+        int firstYear = year(minT), lastYear = year(maxT);
+        int holdYear = lastYear;
+        if (count(all, holdYear) < 500) holdYear--;
+        List<Integer> valYears = new ArrayList<>();
+        for (int y = firstYear + 2; y < holdYear; y++) valYears.add(y);
+        if (valYears.size() < 2) return new Report("-", 0, none, null, List.of(), all.size(), items, now, false, "Not enough years of history to test (need 4+ years)", new double[F]);
+        // forecasts for every validation year and the holdout, per horizon
+        List<List<Preds>> val = new ArrayList<>();
+        List<Preds> hold = new ArrayList<>();
+        for (int k = 0; k < HORIZONS.length; k++) {
+            List<Preds> pk = new ArrayList<>();
+            for (int y : valYears) pk.add(predictYear(all, k, y, nTrees));
+            val.add(pk);
+            hold.add(predictYear(all, k, holdYear, nTrees));
+        }
+        List<ConfigScore> tried = new ArrayList<>();
+        Config best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        List<Fold> bestFolds = null;
+        int bestK = 0;
+        for (int k = 0; k < HORIZONS.length; k++) for (String rule : new String[]{"THRESH", "TOP5"}) {
+            Config c = new Config(HORIZONS[k], rule);
+            List<Fold> folds = new ArrayList<>();
+            for (Preds p : val.get(k)) if (p != null) folds.add(score(p, k, c));
+            int trades = 0, pos = 0, tested = 0;
+            double net = 0;
+            for (Fold f : folds) { trades += f.trades(); net += f.avgNet() * f.trades(); if (f.trades() >= 30) { tested++; if (f.avgNet() > 0) pos++; } }
+            double avg = trades == 0 ? 0 : net / trades, perDay = avg / c.horizon();
+            tried.add(new ConfigScore(c.label(), trades, avg, perDay, pos, tested));
+            double sc = trades < 100 ? Double.NEGATIVE_INFINITY : perDay;
+            if (sc > bestScore) { bestScore = sc; best = c; bestFolds = folds; bestK = k; }
+        }
+        if (best == null) {
+            best = new Config(HORIZONS[1], "TOP5");
+            bestK = 1;
+            bestFolds = new ArrayList<>();
+            for (Preds p : val.get(1)) if (p != null) bestFolds.add(score(p, 1, best));
+        }
+        Fold h = hold.get(bestK) == null ? null : score(hold.get(bestK), bestK, best);
+        int trades = 0, pos = 0, tested = 0;
+        double net = 0;
+        for (Fold f : bestFolds) { trades += f.trades(); net += f.avgNet() * f.trades(); if (f.trades() >= 30) { tested++; if (f.avgNet() > 0) pos++; } }
+        double avg = trades == 0 ? 0 : net / trades;
+        boolean valOk = tested >= 2 && trades >= 300 && avg > 0.2 && pos >= Math.ceil(tested * 0.6);
+        boolean holdOk = h != null && h.trades() >= 30 && h.avgNet() > 0;
+        boolean edge = valOk && holdOk;
+        String hs = h == null ? "no holdout year" : String.format("holdout %d: %+.2f%% over %d trades", h.year(), h.avgNet(), h.trades());
+        String verdict = edge
+                ? String.format("EDGE (%s): %+.2f%% per trade after tax, positive in %d of %d years; %s", best.label(), avg, pos, tested, hs)
+                : String.format("NO EDGE (best setup %s): %+.2f%% per trade after tax, positive in %d of %d years; %s. Not used for trading.", best.label(), avg, pos, tested, hs);
+        return new Report(best.label(), best.horizon(), bestFolds, h, tried, all.size(), items, now, edge, verdict, importance(all, bestK, nTrees));
+    }
+
+    private static int count(List<Sample> all, int y) {
+        int n = 0;
+        for (Sample s : all) if (year(s.time()) == y) n++;
+        return n;
+    }
+
+    private static Preds predictYear(List<Sample> all, int k, int year, int nTrees) {
+        long from = java.time.LocalDate.of(year, 1, 1).toEpochDay() * DAY, to = java.time.LocalDate.of(year + 1, 1, 1).toEpochDay() * DAY;
+        List<Sample> train = new ArrayList<>(), test = new ArrayList<>();
+        for (Sample s : all) {
+            if (Float.isNaN(s.y()[k])) continue;
+            if (s.time() < from - (HORIZONS[k] + 1) * DAY) train.add(s); // embargo: no label may reach into the test year
+            else if (s.time() >= from && s.time() < to) test.add(s);
+        }
+        if (train.size() < 3000 || test.size() < 500) return null;
+        Gbm g = fit(train, k, nTrees);
+        double[] p = new double[test.size()];
+        for (int i = 0; i < p.length; i++) p[i] = g.predict(test.get(i).x());
+        return new Preds(year, test, p);
+    }
+
+    private static Fold score(Preds pr, int k, Config c) {
+        List<Sample> test = pr.test();
+        double[] p = pr.p();
+        double se = 0, se0 = 0, dirHit = 0, dirN = 0, net = 0, wins = 0;
+        int trades = 0;
+        boolean[] take = new boolean[p.length];
+        if (c.rule().equals("TOP5")) {
+            Map<Long, List<Integer>> byDay = new java.util.HashMap<>();
+            for (int i = 0; i < p.length; i++) byDay.computeIfAbsent(test.get(i).time(), t -> new ArrayList<>()).add(i);
+            for (List<Integer> day : byDay.values()) {
+                day.sort((a, b) -> Double.compare(p[b], p[a]));
+                for (int j = 0; j < Math.min(5, day.size()); j++) if (p[day.get(j)] > TAX_PCT) take[day.get(j)] = true;
+            }
+        } else for (int i = 0; i < p.length; i++) take[i] = p[i] > TAX_PCT + 0.25;
+        for (int i = 0; i < p.length; i++) {
+            double y = test.get(i).y()[k];
+            se += (y - p[i]) * (y - p[i]);
+            se0 += y * y;
+            if (Math.abs(p[i]) > 0.05 && y != 0) { dirN++; if (Math.signum(p[i]) == Math.signum(y)) dirHit++; }
+            if (take[i]) { trades++; double r = y - TAX_PCT; net += r; if (r > 0) wins++; }
+        }
+        double avg = trades == 0 ? 0 : net / trades;
+        return new Fold(pr.year(), test.size(), se0 == 0 ? 0 : 1 - se / se0, dirN == 0 ? 0.5 : dirHit / dirN, trades, avg, trades == 0 ? 0 : wins / trades, avg / c.horizon());
+    }
+
+    private static Gbm fit(List<Sample> train, int k, int nTrees) {
+        int n = 0;
+        for (Sample s : train) if (!Float.isNaN(s.y()[k])) n++;
         float[][] X = new float[n][];
         float[] y = new float[n];
-        for (int i = 0; i < n; i++) { X[i] = train.get(i).x(); y[i] = train.get(i).y(); }
+        int j = 0;
+        for (Sample s : train) if (!Float.isNaN(s.y()[k])) { X[j] = s.x(); y[j++] = s.y()[k]; }
         return Gbm.fit(X, y, nTrees, 3, 0.05, 20, 100, 42);
     }
 
-    /** Which features the final model splits on, weighted by usage. */
-    private static double[] importance(List<Sample> all, int nTrees) {
-        Gbm g = fit(all, Math.min(nTrees, 60));
+    /** Which features the model splits on, weighted by usage. */
+    private static double[] importance(List<Sample> all, int k, int nTrees) {
+        Gbm g = fit(all, k, Math.min(nTrees, 60));
         double[] u = new double[F];
         double sum = 0;
         for (Gbm.Tree t : g.trees) for (int i = 0; i < t.feat.length; i++) if (t.feat[i] >= 0) { u[t.feat[i]]++; sum++; }
@@ -205,8 +295,10 @@ public final class Deep {
         return u;
     }
 
-    /** Fits the final model on everything. */
-    public static Gbm finalModel(List<Sample> all, int nTrees) {
-        return fit(all, nTrees);
+    /** Fits the final model on everything for the chosen horizon (days). */
+    public static Gbm finalModel(List<Sample> all, int horizonDays, int nTrees) {
+        int k = 0;
+        for (int i = 0; i < HORIZONS.length; i++) if (HORIZONS[i] == horizonDays) k = i;
+        return fit(all, k, nTrees);
     }
 }

@@ -84,9 +84,9 @@ public final class DeepTrainer {
                 List<Deep.Sample> sm = Deep.samples(id, pts);
                 if (!sm.isEmpty()) { all.addAll(sm); used++; }
             }
-            phase = "testing on unseen years (" + all.size() + " samples)";
-            Deep.Report r = Deep.walkForward(all, used, 1.5, TREES, System.currentTimeMillis());
-            Gbm m = r.edge() ? Deep.finalModel(all, TREES) : null;
+            phase = "testing 6 setups on unseen years (" + all.size() + " samples, takes a minute or two)";
+            Deep.Report r = Deep.walkForward(all, used, TREES, System.currentTimeMillis());
+            Gbm m = r.edge() ? Deep.finalModel(all, r.horizon(), TREES) : null;
             report = r;
             model = m;
             CACHE.clear();
@@ -113,7 +113,7 @@ public final class DeepTrainer {
         return null;
     }
 
-    /** Forecast of the 3-day move in % for an item, or NaN. Only answers when the walk-forward verdict is EDGE. */
+    /** Forecast of the move over the chosen horizon in % for an item, or NaN. Only answers when the walk-forward verdict is EDGE. */
     public static double predict(String id) {
         Deep.Report r = report;
         Gbm m = model;

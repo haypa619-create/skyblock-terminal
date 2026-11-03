@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0 (alpha lab)
+- CRAFT: craft arbitrage (recipes from the NEU repo, downloaded once a week) and NPC arbitrage (items an NPC pays more for than the Bazaar asks). Profit by buy orders and by insta-buy, capped by real volume.
+- SEAS: SkyBlock-year clock. Builds a 2-hour price archive about two years back for the 60 busiest items (saved to disk, one request every 2 s) and finds slots of the ~5-day mayor/event cycle where an item reliably rises or falls. Strict test (t >= 3.3, 20+ years, same sign in old and new history).
+- New calendar event: new mayor takes office (Late Spring 27).
+- Deep model v2: volume and order-flow inputs, tests 1, 3 and 7 day horizons and two trade rules, picks the best on validation years, then scores it on a locked holdout year. EDGE needs both.
+- ALGO DEEP column shows the chosen horizon's forecast (only on EDGE).
+
 ## 0.11.0
 - Deep model: downloads years of daily history for the 150 busiest items and trains a gradient-boosted model for the 3-day move.
 - Walk-forward test: trains on earlier years, tests on the next unseen year, profit counted after the 1.25% tax. The verdict says EDGE only if it holds across years; otherwise NO EDGE and it is not used.

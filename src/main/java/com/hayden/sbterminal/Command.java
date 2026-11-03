@@ -16,7 +16,7 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, FLIP, LIST, NOTIFY, BB, BIND, ALGO, BT, NEWS, ML, TRAIN, ITEM, EMPTY }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, FLIP, LIST, NOTIFY, BB, BIND, ALGO, BT, NEWS, ML, TRAIN, CRAFT, SEAS, ITEM, EMPTY }
 
     /** Function codes, for the autocomplete dropdown. */
     public static final String[][] CODES = {
@@ -30,7 +30,7 @@ public final class Command {
             {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"},
             {"FLIP", "Flip finder. FLIP MIN 5k = cheapest item, FLIP SLOTS 36 = inventory size"},
             {"LIST", "LIST mining: switch or create a Monitor list (LIST alone cycles)"},
-            {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"NEWS", "News, mayor, election and the SkyBlock event calendar"}, {"TRAIN", "Retrain the deep model on years of daily history (takes a few minutes)"}, {"ML", "The learning model: how well it predicts, and what it learned"}, {"ALGO", "Trading model: market-making signals ranked by risk-adjusted profit per hour"}, {"BT", "BT <item>: backtest the mean-reversion rule on years of daily history"}, {"BB", "Bollinger bands on the chart on/off"}, {"BIND", "BIND FLIP, BIND FLIP F6, BIND RESET: set your hotkeys"}};
+            {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"NEWS", "News, mayor, election and the SkyBlock event calendar"}, {"CRAFT", "Craft and NPC arbitrage: crafts worth more than their inputs, items NPCs pay more for"}, {"SEAS", "SkyBlock-year clock: when items reliably rise or fall in the mayor/event cycle"}, {"TRAIN", "Retrain the deep model on years of daily history (takes a few minutes)"}, {"ML", "The learning model: how well it predicts, and what it learned"}, {"ALGO", "Trading model: market-making signals ranked by risk-adjusted profit per hour"}, {"BT", "BT <item>: backtest the mean-reversion rule on years of daily history"}, {"BB", "Bollinger bands on the chart on/off"}, {"BIND", "BIND FLIP, BIND FLIP F6, BIND RESET: set your hotkeys"}};
     public enum Range {
         H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L),
         M1("1M", 30 * 86_400_000L), M3("3M", 90 * 86_400_000L), Y1("1Y", 365 * 86_400_000L), ALL("ALL", 3650L * 86_400_000L);
@@ -74,6 +74,8 @@ public final class Command {
             case "NEWS", "CAL", "CALENDAR", "MAYOR" -> { return simple(Fn.NEWS); }
             case "ML", "MODEL", "LEARN" -> { return simple(Fn.ML); }
             case "TRAIN", "DEEP", "RETRAIN" -> { return simple(Fn.TRAIN); }
+            case "CRAFT", "CRAFTS", "NPC", "ARB" -> { return simple(Fn.CRAFT); }
+            case "SEAS", "SEASON", "SEASONS", "CLOCK" -> { return simple(Fn.SEAS); }
             case "ALGO", "QUANT", "MM" -> { return simple(Fn.ALGO); }
             case "BT", "BACKTEST" -> { return new Parsed(Fn.BT, s.substring(w[0].length()).trim(), null, null, List.of(), null); }
             case "BB", "BOLL" -> { return simple(Fn.BB); }

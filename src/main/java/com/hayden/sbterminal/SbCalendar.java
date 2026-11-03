@@ -45,6 +45,7 @@ public final class SbCalendar {
             new Event("ZOO_S", "Traveling Zoo (summer)", false, (3 * 31) * DAY_MS, 3 * DAY_MS, "Early Summer 1: pets and pet items"),
             new Event("ZOO_W", "Traveling Zoo (winter)", false, (9 * 31) * DAY_MS, 3 * DAY_MS, "Early Winter 1: pets and pet items"),
             new Event("NEWYEAR", "New Year Celebration", false, (11 * 31 + 28) * DAY_MS, 3 * DAY_MS, "Late Winter 29: New Year cakes"),
+            new Event("MAYOR", "New mayor takes office", false, (2 * 31 + 26) * DAY_MS, DAY_MS, "Late Spring 27: election ends, perks switch"),
             new Event("DARK", "Dark Auction", true, 55 * 60_000L, 5 * 60_000L, "every hour at :55"),
             new Event("JACOB", "Jacob's Contest", true, 15 * 60_000L, 20 * 60_000L, "every hour at :15, 20 minutes"));
 
