@@ -35,6 +35,21 @@ public final class Config {
     public long ticketQty = 1000;
     /** false: B and /sbt always open the Monitor. true: reopen on the screen you left. */
     public boolean reopenLast = false;
+    /** Extra named Monitor lists (the built-in one is MAIN, stored in watchlist). */
+    public java.util.Map<String, List<String>> lists = new java.util.LinkedHashMap<>();
+    /** Which list the Monitor shows: MAIN or a key of lists. */
+    public String activeList = "MAIN";
+    /** Notifications. */
+    public boolean alertFilled = true, alertOutbid = true;
+    /** Warn once per limit window when this % of the daily limit is used. 0 = off. */
+    public int limitWarnPct = 85;
+    /** Sounds: PLING BELL CHIME HARP BIT ORB BASS. */
+    public String soundGood = "PLING", soundBad = "BASS";
+    /** Flip finder: share of the market's hourly volume you could realistically capture, and whether risky rows show. */
+    public double flipShare = 0.05;
+    public boolean flipRisky = false;
+    /** Chart: Bollinger bands (20 points, 2 sigma). */
+    public boolean bollinger = false;
     /** Where you were, so the terminal reopens there. */
     public String lastView = "MON", lastItem = null, lastRange = "D1";
 
@@ -52,9 +67,27 @@ public final class Config {
         if (c == null) c = new Config();
         if (c.watchlist == null) c.watchlist = new ArrayList<>();
         if (c.priceAlerts == null) c.priceAlerts = new ArrayList<>();
+        if (c.lists == null) c.lists = new java.util.LinkedHashMap<>();
+        if (c.activeList == null || (!c.activeList.equals("MAIN") && !c.lists.containsKey(c.activeList))) c.activeList = "MAIN";
+        if (c.soundGood == null) c.soundGood = "PLING";
+        if (c.soundBad == null) c.soundBad = "BASS";
         c.file = f;
         c.save();
         return c;
+    }
+
+    /** The list the Monitor is showing (never null). */
+    public List<String> wl() {
+        if (activeList == null || activeList.equals("MAIN")) return watchlist;
+        return lists.computeIfAbsent(activeList, k -> new ArrayList<>());
+    }
+
+    /** MAIN first, then your lists in creation order. */
+    public List<String> listNames() {
+        List<String> out = new ArrayList<>();
+        out.add("MAIN");
+        out.addAll(lists.keySet());
+        return out;
     }
 
     public void save() {

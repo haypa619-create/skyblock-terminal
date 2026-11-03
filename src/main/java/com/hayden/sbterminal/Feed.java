@@ -22,6 +22,23 @@ public final class Feed {
     public static volatile String error = null;
     public static volatile boolean terminalOpen = false;
     public static final Recorder RECORDER = new Recorder();
+    /** 2-hourly record of every item for 92 days (1M and 3M charts). */
+    public static volatile LongStore LONG = new LongStore();
+    private static volatile java.nio.file.Path longFile = null;
+    private static volatile long longSavedAt = 0;
+
+    /** Loads the saved long history. Call once before start(). */
+    public static void initLong(java.nio.file.Path dir) {
+        longFile = dir.resolve("sbterminal-history.bin");
+        LONG = LongStore.load(longFile);
+        Runtime.getRuntime().addShutdownHook(new Thread(Feed::saveLong));
+    }
+
+    static void saveLong() {
+        java.nio.file.Path f = longFile;
+        if (f == null) return;
+        try { LONG.save(f); longSavedAt = System.currentTimeMillis(); } catch (Exception e) { Terminal.LOG.warn("Could not save long history: {}", e.toString()); }
+    }
 
     private record Hist(List<Bars.Point> pts, long fetchedAt) {}
 
@@ -85,6 +102,7 @@ public final class Feed {
             if (s.hypixelUpdated() != snapshot.hypixelUpdated() || snapshot.products().isEmpty()) {
                 snapshot = s;
                 RECORDER.record(s, now);
+                if (LONG.record(s, now) || now - longSavedAt > 30 * 60_000L && longFile != null) HISTORY.execute(Feed::saveLong);
             }
             error = null;
         } catch (Exception e) {

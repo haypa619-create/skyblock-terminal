@@ -16,7 +16,7 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, ITEM, EMPTY }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, FLIP, LIST, NOTIFY, BB, ITEM, EMPTY }
 
     /** Function codes, for the autocomplete dropdown. */
     public static final String[][] CODES = {
@@ -27,9 +27,13 @@ public final class Command {
             {"PORT", "Portfolio: positions, cost, P&L, open orders"}, {"PNL", "P&L history: equity curve, by day, by item"},
             {"ALERT", "ALERT coal < 120 (or BID/ASK/SPR/CHG1H)"}, {"ALRT", "Your alerts"}, {"SECT", "Sectors: index moves by Bazaar category"},
             {"CMP", "CMP <item>: compare on the chart (CMP alone clears)"}, {"LIMIT", "Daily limit ledger, LIMIT 15B, LIMIT RESET 7:00 PM"}, {"POS", "POS item units cost: set a position by hand"},
-            {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"}};
+            {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"},
+            {"FLIP", "Flip finder: best Bazaar flips by profit per hour"},
+            {"LIST", "LIST mining: switch or create a Monitor list (LIST alone cycles)"},
+            {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"BB", "Bollinger bands on the chart on/off"}};
     public enum Range {
-        H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L);
+        H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L),
+        M1("1M", 30 * 86_400_000L), M3("3M", 90 * 86_400_000L);
         public final String label;
         public final long span;
         Range(String label, long span) { this.label = label; this.span = span; }
@@ -65,6 +69,10 @@ public final class Command {
                 return new Parsed(fn, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null);
             }
             case "KEYS" -> { return simple(Fn.KEYS); }
+            case "FLIP", "FLIPS" -> { return simple(Fn.FLIP); }
+            case "BB", "BOLL" -> { return simple(Fn.BB); }
+            case "LIST", "LISTS" -> { return new Parsed(Fn.LIST, s.substring(w[0].length()).trim(), null, null, List.of(), null); }
+            case "NOTIFY", "NOTIF" -> { return new Parsed(Fn.NOTIFY, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }
             case "FONT" -> { return new Parsed(Fn.FONT, w.length > 1 ? w[1].toUpperCase(Locale.US) : "", null, null, List.of(), null); }
             case "SCR", "EQS", "SCREEN" -> {
                 List<Screener.Filter> fs = new ArrayList<>();
@@ -104,6 +112,8 @@ public final class Command {
             case "1D", "24H" -> Range.D1;
             case "3D" -> Range.D3;
             case "1W", "7D" -> Range.W1;
+            case "1M", "30D" -> Range.M1;
+            case "3M", "90D" -> Range.M3;
             default -> null;
         };
     }

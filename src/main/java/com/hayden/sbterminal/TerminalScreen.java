@@ -41,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
+    enum View { MON, MOV, SCR, FLIP, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -58,6 +58,8 @@ public final class TerminalScreen extends Screen {
     private static List<Screener.Filter> filters = new ArrayList<>();
     private static Screener.Field sortField = Screener.Field.FLOW;
     private static boolean sortDesc = true;
+    private static Flips.Sort flipSort = Flips.Sort.EST;
+    private static boolean flipDesc = true;
     /** Monitor sort column (-1 = your own order). */
     private static int monSort = -1;
     private static boolean monDesc = true;
@@ -132,7 +134,7 @@ public final class TerminalScreen extends Screen {
         restoreOnce();
         Feed.terminalOpen = true;
         if (view == View.ITEM && item != null) { Feed.day(item); Feed.week(item); }
-        if (Terminal.CONFIG.watchlist.isEmpty() && view == View.MON) status("Type an item and press Enter. ADD <item> builds your Monitor.", GRAY);
+        if (Terminal.CONFIG.wl().isEmpty() && view == View.MON) status("Type an item and press Enter. ADD <item> builds your Monitor.", GRAY);
     }
 
     @Override
@@ -176,11 +178,13 @@ public final class TerminalScreen extends Screen {
         int y = 30;
         y = drawTitleLine(y);
         y = drawToolbar(y, mx, my);
-        int bottom = height - 14;
+        int bottom = height - 25;
+        drawHealth(height - 24, mx, my);
         switch (view) {
             case MON -> drawMonitor(y, bottom, mx, my);
             case MOV -> drawMovers(y, bottom, mx, my);
             case SCR -> drawScreener(y, bottom, mx, my);
+            case FLIP -> drawFlips(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
             case PNL -> drawPnl(y, bottom, mx, my);
@@ -221,6 +225,7 @@ public final class TerminalScreen extends Screen {
             case MON -> "MON";
             case MOV -> "MOV";
             case SCR -> "SCR";
+            case FLIP -> "FLIP";
             case ITEM -> "DES";
             case PORT -> "PORT";
             case PNL -> "PNL";
@@ -237,6 +242,7 @@ public final class TerminalScreen extends Screen {
             case MON -> "Monitor";
             case MOV -> "Movers";
             case SCR -> "Screener";
+            case FLIP -> "Flip finder";
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
             case PNL -> "P&L history";
@@ -268,7 +274,7 @@ public final class TerminalScreen extends Screen {
             int x = gx.t(Feed.name(item).toUpperCase(Locale.US), 4, y + 3, AMBER) + 8;
             x = gx.t("Bazaar", x, y + 3, WHITE) + 8;
             x = gx.t(item, x, y + 3, DIM) + 10;
-            if (Terminal.CONFIG.watchlist.contains(item)) gx.t("★ MON", x, y + 3, YELLOW);
+            if (Terminal.CONFIG.wl().contains(item)) gx.t("★ MON", x, y + 3, YELLOW);
             if (p != null) {
                 float sc = 1.6f;
                 String bid = Fmt.px(p.bid()), ask = Fmt.px(p.ask());
@@ -321,10 +327,11 @@ public final class TerminalScreen extends Screen {
         x = cap("F3", "MOV", YELLOW, x, y, () -> go(View.MOV, null));
         x = cap("F4", "SCR", YELLOW, x, y, () -> go(View.SCR, null));
         x = cap("F7", "PORT", YELLOW, x, y, () -> go(View.PORT, null));
+        x = cap("F8", "FLIP", YELLOW, x, y, () -> go(View.FLIP, null));
         if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap("F6", "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y); }
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
-        else if (view == View.SCR) cap("←→", "sort", GRAY, x, y);
-        else if (view == View.MON) cap("Shift↑↓", "move", GRAY, x, y);
+        else if (view == View.SCR || view == View.FLIP) cap("←→", "sort", GRAY, x, y);
+        else if (view == View.MON) { x = cap("Shift↑↓", "move", GRAY, x, y); cap("F9", "LIST", YELLOW, x, y, this::cycleList); }
         String bf = Feed.backfillStatus();
         if (!bf.isEmpty()) gx.tr(bf, width - 4, y + 3, DIM);
     }
@@ -367,7 +374,7 @@ public final class TerminalScreen extends Screen {
         switch (v) {
             case ITEM -> {
                 if (item == null) break;
-                boolean on = Terminal.CONFIG.watchlist.contains(item);
+                boolean on = Terminal.CONFIG.wl().contains(item);
                 a.add(new Action("BUY order", () -> { tSide = Ticket.Side.BUY; placeTicket(false); }));
                 a.add(new Action("SELL offer", () -> { tSide = Ticket.Side.SELL; placeTicket(false); }));
                 a.add(new Action("Buy now", () -> { tSide = Ticket.Side.BUY; placeTicket(true); }));
@@ -413,6 +420,13 @@ public final class TerminalScreen extends Screen {
                     Terminal.CONFIG.save();
                     status("Cleared what was learned (manual settings stay)", GRAY);
                 }));
+            }
+            case FLIP -> {
+                a.add(new Action("Best per hour", () -> setFlipSort(Flips.Sort.EST)));
+                a.add(new Action("Best per unit", () -> setFlipSort(Flips.Sort.NET)));
+                a.add(new Action("Best ROI", () -> setFlipSort(Flips.Sort.ROI)));
+                a.add(new Action(Terminal.CONFIG.flipRisky ? "Hide risky" : "Show risky", () -> { Terminal.CONFIG.flipRisky = !Terminal.CONFIG.flipRisky; Terminal.CONFIG.save(); sel = 0; scroll = 0; }));
+                a.add(new Action("Share " + Math.round(Terminal.CONFIG.flipShare * 100) + "%", this::cycleShare));
             }
             case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
             case SECX -> a.add(new Action("All sectors", () -> go(View.SECT, null)));
@@ -460,8 +474,95 @@ public final class TerminalScreen extends Screen {
         };
     }
 
+    /** Tabs for the Monitor lists (MAIN plus your own). Returns the y below them. */
+    private int drawListTabs(int top) {
+        int x = 6;
+        for (String n : Terminal.CONFIG.listNames()) {
+            boolean on = n.equals(Terminal.CONFIG.activeList);
+            int w = gx.w(n) + 10;
+            gx.fill(x, top + 1, x + w, top + 12, on ? AMBER : 0xFF1C1C1C);
+            gx.t(n, x + 5, top + 3, on ? BLACK : GRAY);
+            hits.add(new Hit(x, top + 1, x + w, top + 12, () -> switchList(n)));
+            x += w + 3;
+        }
+        gx.t("LIST name creates one", x + 8, top + 3, DIM);
+        return top + 14;
+    }
+
+    private void switchList(String n) {
+        Terminal.CONFIG.activeList = n;
+        Terminal.CONFIG.save();
+        sel = 0;
+        scroll = 0;
+        monSort = -1;
+        status("List " + n + " (" + Terminal.CONFIG.wl().size() + " items)", GRAY);
+    }
+
+    private void cycleList() {
+        List<String> names = Terminal.CONFIG.listNames();
+        if (names.size() < 2) { status("Only one list. LIST mining creates another.", GRAY); return; }
+        int i = names.indexOf(Terminal.CONFIG.activeList);
+        switchList(names.get((i + 1) % names.size()));
+        if (view != View.MON) go(View.MON, null);
+    }
+
+    private void listCommand(String arg) {
+        String a = arg == null ? "" : arg.trim();
+        if (a.isEmpty()) { cycleList(); return; }
+        String[] w = a.split("\\s+", 2);
+        if (w[0].equalsIgnoreCase("DEL") && w.length > 1) {
+            String n = w[1].trim().toUpperCase(Locale.US);
+            if (n.equals("MAIN") || !Terminal.CONFIG.lists.containsKey(n)) { status("No list called " + n + " (MAIN can't be deleted)", RED); return; }
+            Terminal.CONFIG.lists.remove(n);
+            if (n.equals(Terminal.CONFIG.activeList)) Terminal.CONFIG.activeList = "MAIN";
+            Terminal.CONFIG.save();
+            status("Deleted list " + n, GRAY);
+            return;
+        }
+        String n = a.toUpperCase(Locale.US).replaceAll("[^A-Z0-9 _-]", "");
+        if (n.length() > 12) n = n.substring(0, 12).trim();
+        if (n.isEmpty()) { status("Give the list a short name, e.g. LIST mining", RED); return; }
+        boolean created = !n.equals("MAIN") && !Terminal.CONFIG.lists.containsKey(n);
+        if (created) Terminal.CONFIG.lists.put(n, new ArrayList<>());
+        switchList(n);
+        if (view != View.MON) go(View.MON, null);
+        status((created ? "Created list " + n + ". ADD items to fill it. " : "") + "F9 or LIST cycles lists", GREEN);
+    }
+
+    private void notifyCommand(String arg) {
+        Config c = Terminal.CONFIG;
+        String[] w = arg == null || arg.isBlank() ? new String[0] : arg.trim().split("\\s+");
+        if (w.length == 0) {
+            status("FILLED " + (c.alertFilled ? "on" : "off") + "  OUTBID " + (c.alertOutbid ? "on" : "off") + "  LIMIT " + (c.limitWarnPct > 0 ? c.limitWarnPct + "%" : "off")
+                    + "  sounds " + c.soundGood + " / " + c.soundBad, AMBER);
+            return;
+        }
+        boolean off = w.length > 1 && (w[1].equals("OFF") || w[1].equals("0"));
+        switch (w[0]) {
+            case "FILLED" -> { c.alertFilled = !off; status("Filled alerts " + (off ? "off" : "on"), GREEN); }
+            case "OUTBID" -> { c.alertOutbid = !off; status("Outbid alerts " + (off ? "off" : "on"), GREEN); }
+            case "LIMIT" -> {
+                double v = w.length > 1 ? Ticket.parseNum(w[1].replace("%", "")) : 85;
+                c.limitWarnPct = off ? 0 : (int) Math.max(1, Math.min(100, v));
+                status(c.limitWarnPct == 0 ? "Limit warning off" : "Warn at " + c.limitWarnPct + "% of the daily limit", GREEN);
+            }
+            case "SOUND" -> {
+                if (w.length < 3 || !Sounds.NAMES.contains(w[2]) || !(w[1].equals("GOOD") || w[1].equals("BAD"))) {
+                    status("NOTIFY SOUND GOOD|BAD " + String.join("|", Sounds.NAMES), RED);
+                    return;
+                }
+                if (w[1].equals("GOOD")) c.soundGood = w[2]; else c.soundBad = w[2];
+                Terminal.alert("Sound test: " + w[2], w[1].equals("BAD"));
+                status(w[1] + " alerts now use " + w[2], GREEN);
+            }
+            default -> status("NOTIFY FILLED OFF | OUTBID OFF | LIMIT 85 | SOUND GOOD BELL", RED);
+        }
+        c.save();
+    }
+
     private void drawMonitor(int top, int bottom, int mx, int my) {
-        List<String> ids = new ArrayList<>(Terminal.CONFIG.watchlist);
+        if (!Terminal.CONFIG.lists.isEmpty()) top = drawListTabs(top);
+        List<String> ids = new ArrayList<>(Terminal.CONFIG.wl());
         if (ids.isEmpty()) {
             rows = ids;
             gx.t("Your Monitor is empty.", 6, top + 4, WHITE);
@@ -584,6 +685,97 @@ public final class TerminalScreen extends Screen {
         listRows(t, ids, top + 2 * LH + 6, bottom, mx, my);
     }
 
+    // ---------- FLIP ----------
+
+    private static final String[] FCOLS = {"ITEM", "BUY AT", "SELL AT", "NET/U", "ROI%", "UNITS/H", "EST/H"};
+    private static final double[] FCOLW = {0.30, 0.12, 0.12, 0.12, 0.09, 0.11, 0.14};
+
+    private void setFlipSort(Flips.Sort s) {
+        if (flipSort == s) flipDesc = !flipDesc; else { flipSort = s; flipDesc = true; }
+        sel = 0;
+        scroll = 0;
+    }
+
+    private void cycleShare() {
+        double[] opts = {0.02, 0.05, 0.10, 0.20};
+        int i = 0;
+        for (int k = 0; k < opts.length; k++) if (Math.abs(opts[k] - Terminal.CONFIG.flipShare) < 1e-9) i = k;
+        Terminal.CONFIG.flipShare = opts[(i + 1) % opts.length];
+        Terminal.CONFIG.save();
+    }
+
+    private void drawFlips(int top, int bottom, int mx, int my) {
+        double tax = 1 - Terminal.CONFIG.taxPct / 100.0;
+        List<Flips.Row> res = Flips.run(Feed.snapshot.products().values(), tax, Terminal.CONFIG.flipShare, Terminal.CONFIG.minWeekVolume,
+                Terminal.CONFIG.flipRisky, flipSort, flipDesc);
+        int x = gx.t(res.size() + " FLIPS", 6, top + 2, AMBER) + 10;
+        gx.t(gx.fit("buy at bid+0.1, sell at ask-0.1, tax " + Terminal.CONFIG.taxPct + "%, EST/H assumes you capture "
+                + Math.round(Terminal.CONFIG.flipShare * 100) + "% of the hourly volume. "
+                + (Terminal.CONFIG.flipRisky ? "Risky rows shown (!)." : "Risky rows hidden (huge ROI or thin books)."), width - x - 10), x, top + 2, GRAY);
+        Table t = new Table(FCOLS, FCOLW);
+        int col = switch (flipSort) { case PRICE -> 1; case NET -> 3; case ROI -> 4; case VOLH -> 5; case EST -> 6; };
+        t.header(top + LH + 4, col, flipDesc, c -> {
+            Flips.Sort f = switch (c) { case 1, 2 -> Flips.Sort.PRICE; case 3 -> Flips.Sort.NET; case 4 -> Flips.Sort.ROI; case 5 -> Flips.Sort.VOLH; case 6 -> Flips.Sort.EST; default -> null; };
+            if (f != null) setFlipSort(f);
+        });
+        List<String> ids = new ArrayList<>();
+        for (Flips.Row r : res) ids.add(r.p().id());
+        rows = ids;
+        int y0 = top + 2 * LH + 6;
+        int fit = Math.max(1, (bottom - y0) / LH);
+        clampSel(ids.size(), fit);
+        if (ids.isEmpty()) gx.t(Feed.snapshot.products().isEmpty() ? "Waiting for Bazaar data..." : "No flips pass the filters.", 6, y0 + 2, GRAY);
+        for (int i = scroll; i < Math.min(res.size(), scroll + fit); i++) {
+            Flips.Row r = res.get(i);
+            String id = ids.get(i);
+            int y = y0 + (i - scroll) * LH, idx = i;
+            rowBackground(y, i == sel, mx, my, () -> { sel = idx; open(id); });
+            t.cell(0, y, Feed.name(id) + (r.risky() ? " !" : ""), i == sel ? AMBER : r.risky() ? YELLOW : WHITE, 0);
+            t.cell(1, y, Fmt.px(r.buy()), GREEN, 0);
+            t.cell(2, y, Fmt.px(r.sell()), BLUE, 0);
+            t.cell(3, y, Fmt.px(r.net()), changeColor(r.net()), 0);
+            t.cell(4, y, String.format(Locale.US, "%.1f", r.roi()), WHITE, 0);
+            t.cell(5, y, Fmt.qty(r.volH()), GRAY, 0);
+            t.cell(6, y, Fmt.px(r.est()), AMBER, 0);
+        }
+        if (ids.size() > fit) gx.tr((scroll + 1) + "-" + Math.min(ids.size(), scroll + fit) + " of " + ids.size(), width - 6, bottom - LH + 1, DIM);
+    }
+
+    // ---------- order health strip ----------
+
+    /** One line on every screen: open orders, outbid, to claim, limit, and how fresh the order sync is. Click = PORT. */
+    private void drawHealth(int y, int mx, int my) {
+        gx.fill(0, y, width, y + 10, 0xFF0A0A0A);
+        gx.hline(0, width, y, LINE);
+        List<Portfolio.Order> os = Terminal.PORT.orderList();
+        int behind = 0, claim = 0, live = 0;
+        for (Portfolio.Order o : os) {
+            String id = Feed.idForName(o.name);
+            Portfolio.Status st = Portfolio.status(o, id == null ? null : Feed.snapshot.get(id));
+            if (st == Portfolio.Status.FILLED || o.claimable) claim++;
+            else live++;
+            if (st == Portfolio.Status.BEHIND) behind++;
+        }
+        long now = System.currentTimeMillis();
+        int x = 6;
+        x = gx.t("ORDERS ", x, y + 2, AMBER_DIM);
+        x = gx.t(Integer.toString(os.size()), x, y + 2, WHITE) + 12;
+        x = gx.t("OUTBID ", x, y + 2, AMBER_DIM);
+        x = gx.t(Integer.toString(behind), x, y + 2, behind > 0 ? RED : GRAY) + 12;
+        x = gx.t("TO CLAIM ", x, y + 2, AMBER_DIM);
+        x = gx.t(Integer.toString(claim), x, y + 2, claim > 0 ? GREEN : GRAY) + 12;
+        double cap = Terminal.limitAmount(), used = Terminal.PORT.usedSince(Terminal.windowStart(now));
+        if (cap > 0) {
+            double pct = used / cap * 100;
+            x = gx.t("LIMIT ", x, y + 2, AMBER_DIM);
+            x = gx.t(String.format(Locale.US, "%.0f%%", pct), x, y + 2, pct >= 90 ? RED : pct >= 70 ? YELLOW : GRAY) + 12;
+        }
+        long sa = Terminal.PORT.syncedAt;
+        String sync = sa == 0 ? "orders not synced: open Bazaar > Manage Orders" : "synced " + Fmt.ago(now - sa) + " ago";
+        gx.tr(sync + "   click: PORT", width - 6, y + 2, sa == 0 || now - sa > 30 * 60_000L ? YELLOW : DIM);
+        hits.add(new Hit(0, y, width, y + 10, () -> go(View.PORT, null)));
+    }
+
     // ---------- ITEM ----------
 
     private void drawItem(int top, int bottom, int mx, int my) {
@@ -625,21 +817,22 @@ public final class TerminalScreen extends Screen {
             hits.add(new Hit(tx, y + 3, tx + tw, y + 13, () -> range = r));
             tx += tw + 3;
         }
-        tx += 8;
+        tx += 4;
+        {
+            boolean bb = Terminal.CONFIG.bollinger;
+            int bw = gx.w("BB") + 8;
+            gx.fill(tx, y + 3, tx + bw, y + 13, bb ? YELLOW : 0xFF1C1C1C);
+            gx.t("BB", tx + 4, y + 4, bb ? BLACK : GRAY);
+            hits.add(new Hit(tx, y + 3, tx + bw, y + 13, () -> { Terminal.CONFIG.bollinger = !Terminal.CONFIG.bollinger; Terminal.CONFIG.save(); }));
+            tx += bw + 8;
+        }
         gx.fill(tx, y + 7, tx + 8, y + 9, GREEN);
         tx = gx.t("bid", tx + 11, y + 4, GRAY) + 8;
         gx.fill(tx, y + 7, tx + 8, y + 9, BLUE);
         gx.t("ask", tx + 11, y + 4, GRAY);
 
         long span = range.span;
-        List<Bars.Point> src;
-        if (range == Command.Range.W1 || range == Command.Range.D3) {
-            List<Bars.Point> wkPts = Feed.week(item);
-            src = wkPts == null ? new ArrayList<>() : Bars.merge(wkPts, Feed.RECORDER.points(item));
-        } else {
-            Feed.day(item);
-            src = Feed.recent(item);
-        }
+        List<Bars.Point> src = sourceFor(item);
         List<Bars.Point> pts = new ArrayList<>(Bars.window(src, now - span, now));
         pts.add(new Bars.Point(now, p.bid(), p.ask()));
         int px = x + 6, py = y + 20, pw = w - 64, ph = h - 34;
@@ -671,8 +864,16 @@ public final class TerminalScreen extends Screen {
             int cx = px + (int) ((pt.time() - from) * (double) pw / span);
             gx.fill(cx, yOf(pt.askHigh(), lo, hi, py, ph), cx + 1, yOf(pt.bidLow(), lo, hi, py, ph) + 1, 0xFF2C2C2C);
         }
+        if (Terminal.CONFIG.bollinger) bollinger(pts, from, span, lo, hi, px, py, pw, ph);
         plot(pts, true, from, span, lo, hi, px, py, pw, ph, GREEN);
         plot(pts, false, from, span, lo, hi, px, py, pw, ph, BLUE);
+        if (range == Command.Range.M1 || range == Command.Range.M3) {
+            long old = Feed.LONG.oldest();
+            if (old > from + span / 10) {
+                String note = "own record since " + label(old, span) + " (grows as you play)";
+                gx.tr(note, px + pw, y + 4, DIM);
+            }
+        }
         tag(p.ask(), lo, hi, px + pw, py, ph, BLUE);
         tag(p.bid(), lo, hi, px + pw, py, ph, GREEN);
         if (mx >= px && mx < px + pw && my >= py && my < py + ph) {
@@ -687,6 +888,30 @@ public final class TerminalScreen extends Screen {
                 gx.box(sx, py + 2, sw, 11, AMBER_DIM);
                 gx.t(s, sx + 4, py + 4, WHITE);
             }
+        }
+    }
+
+    /** Bollinger bands on the mid price: 20-point average +/- 2 standard deviations. */
+    private void bollinger(List<Bars.Point> pts, long from, long span, double lo, double hi, int px, int py, int pw, int ph) {
+        int n = 20;
+        if (pts.size() < n) return;
+        int[] lx = {Integer.MIN_VALUE, 0, 0}, ly = {0, 0, 0};
+        for (int i = n - 1; i < pts.size(); i++) {
+            double sum = 0;
+            for (int k = i - n + 1; k <= i; k++) sum += pts.get(k).mid();
+            double mean = sum / n, var = 0;
+            for (int k = i - n + 1; k <= i; k++) { double d = pts.get(k).mid() - mean; var += d * d; }
+            double sd = Math.sqrt(var / n);
+            int cx = px + (int) ((pts.get(i).time() - from) * (double) pw / span);
+            double[] v = {mean + 2 * sd, mean, mean - 2 * sd};
+            int[] col = {0xFF8A7A2A, 0xFF5A5A5A, 0xFF8A7A2A};
+            for (int b = 0; b < 3; b++) {
+                int cy = Math.max(py, Math.min(py + ph, yOf(v[b], lo, hi, py, ph)));
+                if (lx[0] != Integer.MIN_VALUE) gx.line(lx[b], ly[b], cx, cy, col[b]);
+                lx[b] = cx;
+                ly[b] = cy;
+            }
+            if (lx[0] == Integer.MIN_VALUE) { /* unreachable: set above */ }
         }
     }
 
@@ -716,6 +941,7 @@ public final class TerminalScreen extends Screen {
 
     private String label(long t, long span) {
         java.time.ZonedDateTime z = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault());
+        if (span >= 14L * 86_400_000L) return z.format(DateTimeFormatter.ofPattern("MMM d", Locale.US));
         return span <= 86_400_000L ? z.format(DateTimeFormatter.ofPattern("HH:mm")) : z.format(DateTimeFormatter.ofPattern("EEE HH:mm", Locale.US));
     }
 
@@ -798,6 +1024,11 @@ public final class TerminalScreen extends Screen {
                 {"POS coal 500 130.5", "set a position by hand (units 0 removes it)"},
                 {"ALERT coal < 120", "alert once in chat (also BID ASK SPR CHG1H). ALRT lists them"},
                 {"PNL / SECT", "P&L history / sector index moves"},
+                {"FLIP / F8", "flip finder: best flips by estimated profit per hour. Risky rows (!) hidden by default"},
+                {"LIST mining / F9", "Monitor lists: LIST name creates or switches, LIST alone cycles, LIST DEL name"},
+                {"ALERT coal ROI > 8", "also ROI (flip margin %) and NET (coins per unit). Add SOUND BELL to pick a sound"},
+                {"NOTIFY", "NOTIFY FILLED OFF, OUTBID OFF, LIMIT 85, SOUND GOOD BELL (PLING BELL CHIME HARP BIT ORB BASS)"},
+                {"BB", "Bollinger bands on the chart. Chart ranges go to 1M and 3M (own record, grows as you play)"},
                 {"CMP coal", "on an item page: overlay another item (% change). CMP alone clears"},
                 {"LIMIT", "daily limit ledger: what counted, when, and the reset countdown"},
                 {"LIMIT 15B / LIMIT RESET 7:00 PM", "set the cap and the daily reset (your time). Both are learned from Hypixel if you don't"},
@@ -809,6 +1040,7 @@ public final class TerminalScreen extends Screen {
                 {"Up / Down, Enter", "pick a row, open it. Click works too. Shift+Up/Down moves a Monitor row"},
                 {"Left / Right", "chart range, movers window, screener sort"},
                 {"F1 F2 F3 F4", "HELP, MON, MOV, SCR"},
+                {"F7 F8 F9", "PORT, FLIP, next Monitor list"},
                 {"Ctrl+V", "paste into the command line"},
                 {"Esc", "clear what you typed, then close the terminal (one press from any screen)"},
                 {"Backspace", "on an empty line: go back one screen"},
@@ -859,7 +1091,7 @@ public final class TerminalScreen extends Screen {
         suggestChangedAt = System.currentTimeMillis();
     }
 
-    private static final java.util.regex.Pattern ALERT_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+(?:BID|ASK|SPR|CHG1H|PX|PRICE|MID)\\b.*|\\s*[<>].*)?$");
+    private static final java.util.regex.Pattern ALERT_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+(?:BID|ASK|SPR|CHG1H|ROI|NET|PX|PRICE|MID)\\b.*|\\s*[<>].*)?$");
     private static final java.util.regex.Pattern POS_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+[\\d.,]+[kmb]?(?:\\s.*)?)?$");
 
     /** Splits "enchanted coal BID > 5" or "coal 500 130" into the item words and what follows them. */
@@ -1052,6 +1284,8 @@ public final class TerminalScreen extends Screen {
             case 292 -> { go(View.MOV, null); return true; }
             case 293 -> { go(View.SCR, null); return true; }
             case 296 -> { go(View.PORT, null); return true; }
+            case 297 -> { go(View.FLIP, null); return true; }
+            case 298 -> { cycleList(); return true; }
             case 294 -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; return true; }
             case 295 -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; return true; }
             default -> { return super.keyPressed(e); }
@@ -1115,6 +1349,14 @@ public final class TerminalScreen extends Screen {
                 range = rs[Math.floorMod(range.ordinal() + dir, rs.length)];
             }
             case MOV -> { moversDay = !moversDay; sel = 0; scroll = 0; }
+            case FLIP -> {
+                Flips.Sort[] fs = {Flips.Sort.EST, Flips.Sort.NET, Flips.Sort.ROI, Flips.Sort.VOLH, Flips.Sort.PRICE};
+                int i = 0;
+                for (int k = 0; k < fs.length; k++) if (fs[k] == flipSort) i = k;
+                flipSort = fs[Math.floorMod(i + dir, fs.length)];
+                sel = 0;
+                scroll = 0;
+            }
             case SCR -> {
                 Screener.Field[] fs = {Screener.Field.FLOW, Screener.Field.VOL, Screener.Field.CHG, Screener.Field.CHG1H, Screener.Field.SPR, Screener.Field.PX};
                 int i = 0;
@@ -1161,6 +1403,14 @@ public final class TerminalScreen extends Screen {
                 else { pick = m; go(View.PICK, null); }
             }
             case PORT -> go(View.PORT, null);
+            case FLIP -> go(View.FLIP, null);
+            case LIST -> listCommand(c.item());
+            case NOTIFY -> notifyCommand(c.item());
+            case BB -> {
+                Terminal.CONFIG.bollinger = !Terminal.CONFIG.bollinger;
+                Terminal.CONFIG.save();
+                status("Bollinger bands " + (Terminal.CONFIG.bollinger ? "on (20 points, 2 sigma)" : "off"), GREEN);
+            }
             case PNL -> go(View.PNL, null);
             case ALRT -> go(View.ALRT, null);
             case SECT -> go(View.SECT, null);
@@ -1464,15 +1714,23 @@ public final class TerminalScreen extends Screen {
 
     // ---------- compare (CMP) ----------
 
-    private List<Bars.Point> seriesFor(String id, long now) {
-        List<Bars.Point> src;
+    /** Price history for the chart range: day data, week data, or the terminal's own 2-hourly record for 1M / 3M. */
+    private List<Bars.Point> sourceFor(String id) {
+        if (range == Command.Range.M1 || range == Command.Range.M3) {
+            List<Bars.Point> wk = Feed.week(id);
+            List<Bars.Point> base = Bars.merge(wk == null ? new ArrayList<>() : wk, Feed.LONG.points(id));
+            return Bars.merge(base, Feed.RECORDER.points(id));
+        }
         if (range == Command.Range.W1 || range == Command.Range.D3) {
             List<Bars.Point> wk = Feed.week(id);
-            src = wk == null ? new ArrayList<>() : Bars.merge(wk, Feed.RECORDER.points(id));
-        } else {
-            Feed.day(id);
-            src = Feed.recent(id);
+            return wk == null ? new ArrayList<>() : Bars.merge(wk, Feed.RECORDER.points(id));
         }
+        Feed.day(id);
+        return Feed.recent(id);
+    }
+
+    private List<Bars.Point> seriesFor(String id, long now) {
+        List<Bars.Point> src = sourceFor(id);
         List<Bars.Point> pts = new ArrayList<>(Bars.window(src, now - range.span, now));
         Market.Product p = Feed.snapshot.get(id);
         if (p != null) pts.add(new Bars.Point(now, p.bid(), p.ask()));
@@ -1672,9 +1930,10 @@ public final class TerminalScreen extends Screen {
         r.field = a.field().name();
         r.op = a.op();
         r.value = a.value();
+        r.sound = a.sound();
         Terminal.CONFIG.priceAlerts.add(r);
         Terminal.CONFIG.save();
-        status("Alert set: " + Feed.name(r.id) + " " + r.describe(), GREEN);
+        status("Alert set: " + Feed.name(r.id) + " " + r.describe() + (r.sound == null ? "" : " (sound " + r.sound + ")"), GREEN);
     }
 
     private void deleteAlert() {
@@ -1989,10 +2248,10 @@ public final class TerminalScreen extends Screen {
 
     private void addOrDel(Command.Fn fn, String id) {
         if (fn == Command.Fn.ADD) {
-            if (!Terminal.CONFIG.watchlist.contains(id)) Terminal.CONFIG.watchlist.add(id);
+            if (!Terminal.CONFIG.wl().contains(id)) Terminal.CONFIG.wl().add(id);
             status("Added " + Feed.name(id) + " to MON", GREEN);
         } else {
-            Terminal.CONFIG.watchlist.remove(id);
+            Terminal.CONFIG.wl().remove(id);
             status("Removed " + Feed.name(id) + " from MON", GRAY);
         }
         Terminal.CONFIG.save();
@@ -2027,7 +2286,7 @@ public final class TerminalScreen extends Screen {
 
     private void toggleWatch(String id) {
         if (id == null) return;
-        addOrDel(Terminal.CONFIG.watchlist.contains(id) ? Command.Fn.DEL : Command.Fn.ADD, id);
+        addOrDel(Terminal.CONFIG.wl().contains(id) ? Command.Fn.DEL : Command.Fn.ADD, id);
     }
 
     private void removeSelected() {
@@ -2042,7 +2301,7 @@ public final class TerminalScreen extends Screen {
     }
 
     private void moveSelected(int dir) {
-        List<String> wl = Terminal.CONFIG.watchlist;
+        List<String> wl = Terminal.CONFIG.wl();
         if (sel >= rows.size()) return;
         monSort = -1;
         String id = rows.get(sel);

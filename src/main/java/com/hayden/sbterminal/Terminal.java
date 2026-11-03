@@ -58,6 +58,7 @@ public final class Terminal implements ClientModInitializer {
         KeyMapping.Category cat = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("sbterminal", "main"));
         openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.sbterminal.open", InputConstants.Type.KEYSYM, InputConstants.KEY_B, cat));
         PORT = Portfolio.load(FabricLoader.getInstance().getConfigDir());
+        Feed.initLong(FabricLoader.getInstance().getConfigDir());
         Feed.start();
         Guide.init();
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
@@ -70,7 +71,7 @@ public final class Terminal implements ClientModInitializer {
                 if (PORT.ledger.size() > before) onCounted(nowMs);
                 PORT.save();
                 java.util.regex.Matcher m = Portfolio.FILLED.matcher(Market.strip(text).trim());
-                if (CONFIG.alerts && m.matches()) alert("Order filled: " + m.group(2) + "x " + m.group(3) + ". Claim it in Manage Orders.", false);
+                if (CONFIG.alerts && CONFIG.alertFilled && m.matches()) alert("Order filled: " + m.group(2) + "x " + m.group(3) + ". Claim it in Manage Orders.", false);
             }
         });
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
@@ -159,6 +160,7 @@ public final class Terminal implements ClientModInitializer {
     private static void checkOutbid(Minecraft mc) {
         if (mc.player == null) return;
         java.util.Set<String> behind = new java.util.HashSet<>();
+        if (!CONFIG.alertOutbid) return;
         for (Portfolio.Order o : PORT.orderList()) {
             String id = Feed.idForName(o.name);
             if (id == null || Portfolio.status(o, Feed.snapshot.get(id)) != Portfolio.Status.BEHIND) continue;
@@ -186,20 +188,48 @@ public final class Terminal implements ClientModInitializer {
             r.fired = true;
             r.firedAt = System.currentTimeMillis();
             changed = true;
-            String now = r.f() == Alerts.Field.SPR || r.f() == Alerts.Field.CHG1H ? String.format(java.util.Locale.US, "%.1f%%", x) : Fmt.px(x);
-            alert("ALERT " + Feed.name(r.id) + ": " + r.describe() + " (now " + now + ")", false);
+            String now = r.f() == Alerts.Field.SPR || r.f() == Alerts.Field.CHG1H || r.f() == Alerts.Field.ROI ? String.format(java.util.Locale.US, "%.1f%%", x) : Fmt.px(x);
+            alert("ALERT " + Feed.name(r.id) + ": " + r.describe() + " (now " + now + ")", false, r.sound);
         }
         if (changed) CONFIG.save();
+        checkLimitWarn();
     }
 
-    static void alert(String text, boolean bad) {
+    private static long warnedWindow = -1;
+
+    /** One warning per limit window when the daily limit passes limitWarnPct. */
+    private static void checkLimitWarn() {
+        if (CONFIG.limitWarnPct <= 0) return;
+        long now = System.currentTimeMillis(), w = windowStart(now);
+        double cap = limitAmount(), used = PORT.usedSince(w);
+        if (cap <= 0 || warnedWindow == w || used < cap * CONFIG.limitWarnPct / 100.0) return;
+        warnedWindow = w;
+        alert(String.format(java.util.Locale.US, "Daily limit %.0f%% used (%s of %s). Resets in %s.", used / cap * 100, Fmt.px(used), Fmt.px(cap),
+                Limit.countdown(Limit.nextReset(now, CONFIG.resetMinuteUtc) - now)), true);
+    }
+
+    static void alert(String text, boolean bad) { alert(text, bad, null); }
+
+    private static net.minecraft.sounds.SoundEvent soundFor(String name) {
+        return switch (name == null ? "" : name.toUpperCase(java.util.Locale.US)) {
+            case "BELL" -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BELL.value();
+            case "CHIME" -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_CHIME.value();
+            case "HARP" -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_HARP.value();
+            case "BIT" -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BIT.value();
+            case "ORB" -> net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP;
+            case "BASS" -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BASS.value();
+            default -> net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING.value();
+        };
+    }
+
+    static void alert(String text, boolean bad, String sound) {
         Minecraft mc = Minecraft.getInstance();
         mc.execute(() -> {
             if (mc.player != null) mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("[SBT] " + text)
                     .withStyle(bad ? net.minecraft.ChatFormatting.RED : net.minecraft.ChatFormatting.GREEN));
             try {
-                mc.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
-                        bad ? net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BASS : net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING, bad ? 0.7f : 1.4f));
+                String pick = sound != null ? sound : bad ? CONFIG.soundBad : CONFIG.soundGood;
+                mc.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(soundFor(pick), bad ? 0.7f : 1.4f));
             } catch (Exception ignored) {
             }
         });

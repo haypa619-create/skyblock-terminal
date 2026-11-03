@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+- FLIP (F8): flip finder. Ranks items by estimated profit per hour (buy at bid+0.1, sell at ask-0.1, minus tax, times a share of the hourly volume). Risky rows (huge ROI or thin books) are hidden unless you show them.
+- Order health strip on every screen: orders, outbid, to claim, daily limit %, and how fresh the order sync is. Click it to open PORT.
+- Charts: 1M and 3M ranges from a 2-hourly record of every item saved to config/sbterminal-history.bin (fills in as you play), and Bollinger bands (BB button or command). Volume under the chart is not possible: no source publishes per-bar Bazaar volume.
+- Monitor lists: LIST name creates or switches, F9 cycles, tabs appear on the Monitor, LIST DEL name removes one.
+- Alerts: ROI (flip margin %) and NET (coins per unit) fields, SOUND per alert, NOTIFY command for filled/outbid on/off, daily-limit warning at a chosen %, and sound choices for good and bad alerts.
+
 ## 0.6.0
 - Fix: claiming a filled buy order now always lands in Portfolio positions. A looser claim-message match, plus a fallback: if a fully filled buy order disappears from Manage Orders, the units are credited.
 
