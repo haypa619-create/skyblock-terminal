@@ -31,7 +31,8 @@ public final class Portfolio {
     public static final class Order {
         public String name;
         public boolean buy, filled;
-        public double units, price, claimed;
+        public double units, price, claimed, filledUnits;
+        public boolean claimable;
         public long at;
     }
 
@@ -42,6 +43,8 @@ public final class Portfolio {
     public double realizedAll = 0;
     /** Sold units that had no tracked cost (bought before the terminal was watching). */
     public double untrackedUnits = 0;
+    /** When Manage Orders last replaced the order list (0 = never). */
+    public long syncedAt = 0;
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private transient Path file;
@@ -117,6 +120,8 @@ public final class Portfolio {
             Order o = find(m.group(3), m.group(1).startsWith("Buy"), false);
             if (o == null) return false;
             o.filled = true;
+            o.claimable = true;
+            o.filledUnits = o.units;
             return true;
         }
         if ((m = CANCEL_SELL.matcher(line)).matches()) {
@@ -197,6 +202,31 @@ public final class Portfolio {
             if (p.units < 0.5) positions.remove(key(name));
         }
         untrackedUnits += units - tracked;
+    }
+
+    // ---------- Manage Orders sync ----------
+
+    /** Replaces the order list with what Hypixel's Manage Orders menu really shows. */
+    public synchronized void syncFrom(List<Sync.Order> menu, long now) {
+        List<Order> next = new ArrayList<>();
+        for (Sync.Order s : menu) {
+            Order keep = null;
+            for (Order o : orders) {
+                if (o.buy == s.buy() && key(o.name).equals(key(s.name())) && Math.abs(o.price - s.price()) < 0.05) { keep = o; break; }
+            }
+            Order o = new Order();
+            o.name = s.name();
+            o.buy = s.buy();
+            o.units = s.amount();
+            o.price = s.price();
+            o.filledUnits = s.filled();
+            o.claimable = s.claimable();
+            o.filled = s.claimable() && s.filled() >= s.amount();
+            o.at = keep != null ? keep.at : now;
+            next.add(o);
+        }
+        orders = next;
+        syncedAt = now;
     }
 
     // ---------- manual edits ----------

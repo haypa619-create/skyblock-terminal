@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  */
 public final class Ticket {
     public enum Side { BUY, SELL }
-    public enum Mode { ORDER, INSTA }
+    public enum Mode { ORDER, INSTA, SYNC }
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
     /** itemName is the Bazaar display name; amount 0 = not needed (sell offers use what you hold). */
@@ -120,6 +120,8 @@ public final class Ticket {
         String t = Market.strip(title == null ? "" : title).toLowerCase(Locale.US);
         boolean buy = a.side() == Side.BUY;
         String item = a.itemName().toLowerCase(Locale.US);
+
+        if (a.mode() == Mode.SYNC) return t.contains("bazaar orders") ? -1 : find(names, "manage orders", false);
 
         if (a.mode() == Mode.INSTA) {
             int c = t.contains("confirm") ? find(names, "confirm", false) : -1;

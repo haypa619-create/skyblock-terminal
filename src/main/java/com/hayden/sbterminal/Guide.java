@@ -60,6 +60,8 @@ public final class Guide {
                 });
             }
             if (screen instanceof AbstractContainerScreen<?> cs) {
+                if (Sync.isOrdersTitle(screen.getTitle().getString())) watchOrders(cs);
+                else maybeStartSync(screen.getTitle().getString());
                 ScreenEvents.afterExtract(screen).register((s, g, mx, my, delta) -> highlight(cs, g));
                 ScreenKeyboardEvents.afterKeyPress(screen).register((s, e) -> {
                     if (s.getFocused() instanceof EditBox) return;
@@ -105,6 +107,53 @@ public final class Guide {
             if (!st.isEmpty() && id.equals(Terminal.bazaarId(st))) n += st.getCount();
         }
         return n;
+    }
+
+    // ---------- order sync ----------
+
+    private static final long STALE_MS = 90_000;
+
+    /** Opening the Bazaar with no order in progress and a stale order list: point at Manage Orders. */
+    private static void maybeStartSync(String title) {
+        String t = Market.strip(title).toLowerCase(java.util.Locale.US);
+        if (!t.contains("bazaar") || t.contains("➜")) return; // the main Bazaar page only
+        long now = System.currentTimeMillis();
+        if (TICKET.current(now) != null) return;
+        if (now - Terminal.PORT.syncedAt < STALE_MS) return;
+        TICKET.start(new Ticket.Active("", "", Ticket.Side.BUY, Ticket.Mode.SYNC, 0, 0, now));
+    }
+
+    /** Reads Manage Orders whenever it is open, however you got there. */
+    private static void watchOrders(AbstractContainerScreen<?> screen) {
+        final int[] ticks = {0};
+        final String[] lastSig = {null};
+        ScreenEvents.afterTick(screen).register(s -> {
+            ticks[0]++;
+            if (ticks[0] < 6 || ticks[0] % 10 != 0) return; // let Hypixel fill the menu first
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null) return;
+            List<String> names = new ArrayList<>();
+            List<List<String>> lores = new ArrayList<>();
+            for (Slot slot : screen.getMenu().slots) {
+                if (slot.container == mc.player.getInventory()) continue;
+                ItemStack st = slot.getItem();
+                if (st.isEmpty()) continue;
+                names.add(st.getHoverName().getString());
+                List<String> lore = new ArrayList<>();
+                ItemLore il = st.get(DataComponents.LORE);
+                if (il != null) for (Component c : il.lines()) lore.add(c.getString());
+                lores.add(lore);
+            }
+            if (names.isEmpty()) return; // menu not filled yet
+            List<Sync.Order> orders = Sync.parseAll(names, lores);
+            String sig = orders.toString();
+            Ticket.Active a = TICKET.current(System.currentTimeMillis());
+            if (a != null && a.mode() == Ticket.Mode.SYNC) TICKET.clear();
+            if (sig.equals(lastSig[0])) return;
+            lastSig[0] = sig;
+            Terminal.PORT.syncFrom(orders, System.currentTimeMillis());
+            Terminal.PORT.save();
+        });
     }
 
     // ---------- signs ----------
@@ -165,6 +214,21 @@ public final class Guide {
         if (a == null) return;
         Minecraft mc = Minecraft.getInstance();
         Slot target = greenSlot(screen);
+        if (a.mode() == Ticket.Mode.SYNC) {
+            String msg = "Syncing your orders: click Manage Orders (or press Enter)";
+            if (target != null) {
+                ContainerScreenAccessor ac = (ContainerScreenAccessor) screen;
+                int sx = ac.sbterminal$getLeftPos() + target.x, sy = ac.sbterminal$getTopPos() + target.y;
+                double ph = (System.currentTimeMillis() % 1000) / 1000.0;
+                int al = 0x60 + (int) (0x50 * (0.5 + 0.5 * Math.sin(ph * 2 * Math.PI)));
+                g.fill(sx, sy, sx + 16, sy + 16, (al << 24) | 0x55FF55);
+                g.outline(sx - 2, sy - 2, 20, 20, 0xFF55FF55);
+                g.outline(sx - 1, sy - 1, 18, 18, 0xFF55FF55);
+            } else if (Sync.isOrdersTitle(screen.getTitle().getString())) msg = "Reading your orders...";
+            else msg = "Open the main Bazaar page to sync your orders";
+            g.centeredText(mc.font, Component.literal(msg).withStyle(ChatFormatting.AQUA), screen.width / 2, 8, 0xFFFFFFFF);
+            return;
+        }
         String what = (a.mode() == Ticket.Mode.INSTA ? (a.side() == Ticket.Side.BUY ? "Buy now " : "Sell now ")
                 : a.side() == Ticket.Side.BUY ? "Buy order " : "Sell offer ") + a.itemName();
         if (target == null) {

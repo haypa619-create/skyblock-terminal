@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Orders now sync from the real Manage Orders menu. It is read whenever you open it, and the list is replaced with exactly what Hypixel shows (partial fills and claimable amounts included).
+- Opening the main Bazaar page with an order list older than 90 seconds lights up Manage Orders in green. One click or Enter and it syncs. Nothing is clicked for you.
+- The portfolio shows when orders were last synced.
+
 ## 0.4.0
 
 - Portfolio (PORT, F7): positions with average cost, live value after Bazaar tax, unrealized P&L, plus realized P&L for today and all time. Built from your Bazaar chat lines (claims and insta-trades), nothing to enter by hand. POS sets a position you held before tracking.

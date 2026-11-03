@@ -1139,7 +1139,9 @@ public final class TerminalScreen extends Screen {
         gx.hline(4, width - 4, ordersTop - 1, LINE);
         int oy = ordersTop + 1;
         gx.t("OPEN ORDERS (" + os.size() + ")", 6, oy, AMBER);
-        gx.t("from Bazaar chat messages; Manage Orders in game is the source of truth", 14 + gx.w("OPEN ORDERS (99)"), oy, DIM);
+        long sa = Terminal.PORT.syncedAt;
+        String syn = sa == 0 ? "never synced: open the Bazaar and click Manage Orders" : "synced " + Fmt.ago(now - sa) + " ago from Manage Orders";
+        gx.t(syn, 14 + gx.w("OPEN ORDERS (99)"), oy, sa == 0 || now - sa > 600_000L ? YELLOW : DIM);
         oy += LH;
         if (os.isEmpty()) gx.t("None tracked. Orders you place after the terminal loads show up here.", 6, oy, DIM);
         os.sort(Comparator.comparingLong((Portfolio.Order o) -> -o.at));
@@ -1155,7 +1157,7 @@ public final class TerminalScreen extends Screen {
             gx.t(gx.fit(o.name, (int) (width * 0.26)), 6 + gx.cw() * 5, oy, WHITE);
             gx.tr(Fmt.qty(o.units) + " @ " + Fmt.px(o.price), (int) (width * 0.55), oy, GRAY);
             String s = switch (st) {
-                case FILLED -> "FILLED - claim it";
+                case FILLED -> o.filledUnits > 0 && o.filledUnits < o.units ? "PARTIAL " + Fmt.qty(o.filledUnits) + "/" + Fmt.qty(o.units) + " - claim" : "FILLED - claim it";
                 case TOP -> "ON TOP";
                 case BEHIND -> (o.buy ? "OUTBID, best " : "UNDERCUT, best ") + (mk == null ? "-" : Fmt.px(o.buy ? mk.bid() : mk.ask()));
             };
