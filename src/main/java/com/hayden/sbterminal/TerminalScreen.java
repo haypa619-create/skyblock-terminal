@@ -41,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, FLIP, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
+    enum View { MON, MOV, SCR, FLIP, ALGO, BT, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -186,6 +186,8 @@ public final class TerminalScreen extends Screen {
             case MOV -> drawMovers(y, bottom, mx, my);
             case SCR -> drawScreener(y, bottom, mx, my);
             case FLIP -> drawFlips(y, bottom, mx, my);
+            case ALGO -> drawAlgo(y, bottom, mx, my);
+            case BT -> drawBacktest(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
             case PNL -> drawPnl(y, bottom, mx, my);
@@ -227,6 +229,8 @@ public final class TerminalScreen extends Screen {
             case MOV -> "MOV";
             case SCR -> "SCR";
             case FLIP -> "FLIP";
+            case ALGO -> "ALGO";
+            case BT -> "BT";
             case ITEM -> "DES";
             case PORT -> "PORT";
             case PNL -> "PNL";
@@ -244,6 +248,8 @@ public final class TerminalScreen extends Screen {
             case MOV -> "Movers";
             case SCR -> "Screener";
             case FLIP -> "Flip finder";
+            case ALGO -> "Trading model";
+            case BT -> "Backtest";
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
             case PNL -> "P&L history";
@@ -319,9 +325,9 @@ public final class TerminalScreen extends Screen {
     /** Clickable tab bar: every screen, with its hotkey when it has one. */
     private void drawTabs(int y, int mx, int my) {
         gx.fill(0, y, width, y + 11, 0xFF101010);
-        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
+        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"ALGO", "ALGO"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
                 {"SECT", null}, {"LIM", null}, {"HELP", "HELP"}};
-        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
+        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.ALGO, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
         int total = 0;
         for (String[] t : tabs) total += gx.w((t[1] != null ? keyLabel(t[1]) + " " : "") + t[0]) + 14;
         boolean keys = total <= width - 8;
@@ -447,6 +453,14 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Min price", () -> { cmd = "FLIP MIN "; status("Cheapest item to show, e.g. 5k (now " + Fmt.px(Terminal.CONFIG.flipMinPrice) + ")", GRAY); }));
                 a.add(new Action("Share " + Math.round(Terminal.CONFIG.flipShare * 100) + "%", this::cycleShare));
             }
+            case ALGO -> {
+                a.add(new Action("Trade selected", this::tradeSelected));
+                a.add(new Action("Backtest selected", () -> { if (sel < rows.size()) startBacktest(rows.get(sel)); }));
+                a.add(new Action("Risk " + Terminal.CONFIG.algoRisk, this::cycleRisk));
+                a.add(new Action("Size " + Math.round(Terminal.CONFIG.algoPurseFrac * 100) + "%", () -> { double[] o = {0.1, 0.25, 0.5}; int i = 0; for (int k = 0; k < o.length; k++) if (Math.abs(o[k] - Terminal.CONFIG.algoPurseFrac) < 1e-9) i = k; Terminal.CONFIG.algoPurseFrac = o[(i + 1) % o.length]; Terminal.CONFIG.save(); algoAt = 0; }));
+                a.add(new Action("Share " + Math.round(Terminal.CONFIG.algoShare * 100) + "%", () -> { double[] o = {0.15, 0.3, 0.5}; int i = 0; for (int k = 0; k < o.length; k++) if (Math.abs(o[k] - Terminal.CONFIG.algoShare) < 1e-9) i = k; Terminal.CONFIG.algoShare = o[(i + 1) % o.length]; Terminal.CONFIG.save(); algoAt = 0; }));
+            }
+            case BT -> { a.add(new Action("Back to ALGO", () -> go(View.ALGO, null))); }
             case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
             case SECX -> a.add(new Action("All sectors", () -> go(View.SECT, null)));
             case MOV -> {
@@ -772,6 +786,158 @@ public final class TerminalScreen extends Screen {
         if (ids.size() > fit) gx.tr((scroll + 1) + "-" + Math.min(ids.size(), scroll + fit) + " of " + ids.size(), width - 6, bottom - LH + 1, DIM);
     }
 
+    // ---------- ALGO: the trading model ----------
+
+    private static List<Quant.Signal> algoCache = List.of();
+    private static long algoAt = 0;
+
+    private void cycleRisk() {
+        double[] o = {0.5, 1, 2, 4};
+        int i = 0;
+        for (int k = 0; k < o.length; k++) if (Math.abs(o[k] - Terminal.CONFIG.algoRisk) < 1e-9) i = k;
+        Terminal.CONFIG.algoRisk = o[(i + 1) % o.length];
+        Terminal.CONFIG.save();
+        algoAt = 0;
+    }
+
+    private void tradeSelected() {
+        if (view != View.ALGO || sel >= algoCache.size()) return;
+        Quant.Signal sg = algoCache.get(sel);
+        tSide = Ticket.Side.BUY;
+        tPrice = 0;
+        Terminal.CONFIG.ticketQty = Math.max(1, (long) Math.floor(sg.units()));
+        Terminal.CONFIG.save();
+        open(sg.p().id());
+        status("Ticket set: buy " + Fmt.qty(Terminal.CONFIG.ticketQty) + " at " + Fmt.px(sg.buy()) + ", then sell at " + Fmt.px(sg.sell()) + ". Enter places it.", GREEN);
+    }
+
+    private static final String[] ACOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z"};
+    private static final double[] ACOLW = {0.24, 0.11, 0.11, 0.11, 0.09, 0.09, 0.08, 0.12, 0.05};
+
+    private void drawAlgo(int top, int bottom, int mx, int my) {
+        long now = System.currentTimeMillis();
+        if (now - algoAt > 5000) {
+            algoAt = now;
+            double limitLeft = Terminal.limitAmount() - Terminal.PORT.usedSince(Terminal.windowStart(now));
+            Quant.Params q = new Quant.Params(1 - Terminal.CONFIG.taxPct / 100.0, Terminal.CONFIG.algoShare, Terminal.CONFIG.algoPurseFrac, Terminal.CONFIG.algoRisk,
+                    Terminal.purse >= 0 ? Terminal.purse : 1e9, Terminal.CONFIG.flipInvUnits, limitLeft);
+            algoCache = Quant.rank(Feed.snapshot.products().values(), id -> { Feed.day(id); return Feed.recent(id); }, q,
+                    Terminal.CONFIG.minWeekVolume, Terminal.CONFIG.flipMinPrice, 80);
+        }
+        List<Quant.Signal> res = algoCache;
+        int x = gx.t(res.size() + " SIGNALS", 6, top + 2, AMBER) + 10;
+        gx.t(gx.fit("Quotes at bid+0.1 / ask-0.1. EDGE/H = coins per hour after tax and a price-risk charge. Z < 0 = cheap vs fair. Signals only: you place the orders.", width - x - 10), x, top + 2, GRAY);
+        Table t = new Table(ACOLS, ACOLW);
+        t.header(top + LH + 4, -1, false, c -> {});
+        List<String> ids = new ArrayList<>();
+        for (Quant.Signal s : res) ids.add(s.p().id());
+        rows = ids;
+        int y0 = top + 2 * LH + 6;
+        int fit = Math.max(1, (bottom - y0 - 2 * LH) / LH);
+        clampSel(ids.size(), fit);
+        if (ids.isEmpty()) gx.t(Feed.snapshot.products().isEmpty() ? "Waiting for Bazaar data..." : "Nothing passes the model right now (or history is still loading).", 6, y0 + 2, GRAY);
+        for (int i = scroll; i < Math.min(res.size(), scroll + fit); i++) {
+            Quant.Signal s = res.get(i);
+            String id = ids.get(i);
+            int y = y0 + (i - scroll) * LH, idx = i;
+            rowBackground(y, i == sel, mx, my, () -> { sel = idx; open(id); });
+            t.cell(0, y, Feed.name(id), i == sel ? AMBER : WHITE, 0);
+            t.cell(1, y, Fmt.px(s.fair()), GRAY, 0);
+            t.cell(2, y, Fmt.px(s.buy()), GREEN, 0);
+            t.cell(3, y, Fmt.px(s.sell()), BLUE, 0);
+            t.cell(4, y, Fmt.px(s.riskAdj()), changeColor(s.riskAdj()), 0);
+            t.cell(5, y, Fmt.qty(s.units()), WHITE, 0);
+            t.cell(6, y, String.format(Locale.US, "%.1fh", s.cycle()), GRAY, 0);
+            t.cell(7, y, Fmt.px(s.edgeH()), AMBER, 0);
+            t.cell(8, y, String.format(Locale.US, "%+.1f", s.z()), s.z() < -1 ? GREEN : s.z() > 1 ? RED : GRAY, 0);
+        }
+        if (!res.isEmpty() && sel < res.size()) {
+            Quant.Signal s = res.get(sel);
+            int ny = bottom - 2 * LH;
+            gx.hline(6, width - 6, ny - 2, LINE);
+            gx.t(gx.fit(Feed.name(s.p().id()) + ": " + s.why() + ". Plan: buy " + Fmt.qty(s.units()) + " at " + Fmt.px(s.buy()) + ", sell at " + Fmt.px(s.sell())
+                    + " (about " + String.format(Locale.US, "%.1f", s.cycle()) + "h, hourly vol " + String.format(Locale.US, "%.2f%%", s.sigma() * 100) + "). Trade selected opens the ticket.", width - 12), 6, ny + 1, YELLOW);
+        }
+    }
+
+    // ---------- BT: backtest ----------
+
+    private static String btItem = null;
+    private static Quant.Result btResult = null;
+    private static int btFor = -1;
+
+    private void backtestCommand(String arg) {
+        String id = item;
+        if (arg != null && !arg.isBlank()) {
+            List<String> m = find(arg);
+            if (m.isEmpty()) { status("No Bazaar item matches \"" + arg + "\"", RED); return; }
+            id = m.get(0);
+        } else if (view == View.ALGO && sel < rows.size()) id = rows.get(sel);
+        if (id == null) { status("BT coal, or open an item first", GRAY); return; }
+        startBacktest(id);
+    }
+
+    private void startBacktest(String id) {
+        btItem = id;
+        btResult = null;
+        btFor = -1;
+        Feed.longHistory(id);
+        go(View.BT, null);
+    }
+
+    private void drawBacktest(int top, int bottom, int mx, int my) {
+        rows = new ArrayList<>();
+        if (btItem == null) { gx.t("BT coal runs the backtest on an item. In ALGO, select a row and use Backtest.", 6, top + 4, GRAY); return; }
+        List<Bars.Point> h = Feed.longHistory(btItem);
+        int y = top + 4;
+        gx.t(Feed.name(btItem).toUpperCase(Locale.US), 6, y, AMBER);
+        y += LH + 2;
+        if (h == null || h.isEmpty()) {
+            gx.t(Feed.loading(btItem) ? "Loading daily history..." : "No daily history for this item.", 6, y, GRAY);
+            return;
+        }
+        if (btResult == null || btFor != h.size()) { btResult = Quant.backtest(h, 1 - Terminal.CONFIG.taxPct / 100.0, 1.0); btFor = h.size(); }
+        Quant.Result r = btResult;
+        gx.t(gx.fit("Rule (fixed, nothing fitted): buy when the daily mid is 1 sigma under a 3-day fair value, sell back at fair after tax, or exit after 10 days or -15%.", width - 12), 6, y, GRAY);
+        y += LH + 4;
+        int cx = 6;
+        cx = pair("DAYS ", Integer.toString(h.size()), cx, y, WHITE);
+        cx = pair("TRADES ", Integer.toString(r.trades()), cx, y, WHITE);
+        cx = pair("WIN ", r.trades() == 0 ? "-" : String.format(Locale.US, "%.0f%%", 100.0 * r.wins() / r.trades()), cx, y, WHITE);
+        cx = pair("AVG/TRADE ", String.format(Locale.US, "%+.2f%%", r.avgPct()), cx, y, changeColor(r.avgPct()));
+        cx = pair("TOTAL ", String.format(Locale.US, "%+.0f%%", r.totalPct()), cx, y, changeColor(r.totalPct()));
+        cx = pair("MAX DRAWDOWN ", String.format(Locale.US, "%.1f%%", r.maxDrawdownPct()), cx, y, r.maxDrawdownPct() > 30 ? RED : GRAY);
+        y += LH + 2;
+        cx = 6;
+        cx = pair("BUY & HOLD ", String.format(Locale.US, "%+.0f%%", r.holdPct()), cx, y, changeColor(r.holdPct()));
+        cx = pair("1ST HALF ", String.format(Locale.US, "%+.0f%%", r.firstHalfPct()), cx, y, changeColor(r.firstHalfPct()));
+        cx = pair("2ND HALF ", String.format(Locale.US, "%+.0f%%", r.secondHalfPct()), cx, y, changeColor(r.secondHalfPct()));
+        y += LH + 4;
+        int ph = bottom - y - 3 * LH - 6, pw = width - 70;
+        if (ph > 20 && r.equity().length > 1) {
+            gx.fill(6, y, 6 + pw + 50, y + ph, PANEL);
+            gx.box(6, y, pw + 50, ph, LINE);
+            double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
+            for (double v : r.equity()) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+            if (hi - lo < 1e-9) hi = lo + 1;
+            int n = r.equity().length;
+            int lx = 0, ly = 0;
+            for (int i = 0; i < n; i++) {
+                int px = 10 + (int) ((long) i * (pw - 8) / (n - 1)), py = y + ph - 4 - (int) ((r.equity()[i] - lo) / (hi - lo) * (ph - 8));
+                if (i > 0) gx.line(lx, ly, px, py, GREEN);
+                lx = px;
+                ly = py;
+            }
+            gx.t("equity (1.0 = start)", 12, y + 3, DIM);
+            gx.tr(String.format(Locale.US, "%.2f", hi), 6 + pw + 46, y + 3, DIM);
+            gx.tr(String.format(Locale.US, "%.2f", lo), 6 + pw + 46, y + ph - 11, DIM);
+        }
+        int ny = bottom - 3 * LH;
+        gx.t(gx.fit("Read it carefully: this assumes every order fills the day you place it, which is optimistic, and daily candles hide intraday swings. "
+                + "If the two halves disagree or the trades are few, don't trust it. " + r.note(), width - 12), 6, ny, r.trades() < 10 ? YELLOW : DIM);
+        gx.t(gx.fit("It only tests the 'buy cheap vs fair' part. Market-making fills need live order-book data; the ALGO screen is the live side.", width - 12), 6, ny + LH, DIM);
+    }
+
     // ---------- order health strip ----------
 
     /** One line on every screen: open orders, outbid, to claim, limit, and how fresh the order sync is. Click = PORT. */
@@ -1063,6 +1229,8 @@ public final class TerminalScreen extends Screen {
                 {"POS coal 500 130.5", "set a position by hand (units 0 removes it)"},
                 {"ALERT coal < 120", "alert once in chat (also BID ASK SPR CHG1H). ALRT lists them"},
                 {"PNL / SECT", "P&L history / sector index moves"},
+                {"ALGO / F10", "trading model: market-making signals, fair value, risk-adjusted profit/h and size. Signals only, you place the orders"},
+                {"BT coal", "backtest the mean-reversion rule on years of daily history (fixed rule, no fitting, optimistic fills)"},
                 {"FLIP / F8", "flip finder: best flips by estimated profit per hour. Risky rows (!) hidden by default"},
                 {"LIST mining / F9", "Monitor lists: LIST name creates or switches, LIST alone cycles, LIST DEL name"},
                 {"ALERT coal ROI > 8", "also ROI (flip margin %) and NET (coins per unit). Add SOUND BELL to pick a sound"},
@@ -1358,6 +1526,7 @@ public final class TerminalScreen extends Screen {
             case "SCR" -> go(View.SCR, null);
             case "PORT" -> go(View.PORT, null);
             case "FLIP" -> go(View.FLIP, null);
+            case "ALGO" -> go(View.ALGO, null);
             case "LIST" -> cycleList();
             case "BUY" -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; }
             case "SELL" -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; }
@@ -1531,6 +1700,8 @@ public final class TerminalScreen extends Screen {
             case PORT -> go(View.PORT, null);
             case FLIP -> flipCommand(c.item());
             case BIND -> bindCommand(c.item());
+            case ALGO -> go(View.ALGO, null);
+            case BT -> backtestCommand(c.item());
             case LIST -> listCommand(c.item());
             case NOTIFY -> notifyCommand(c.item());
             case BB -> {

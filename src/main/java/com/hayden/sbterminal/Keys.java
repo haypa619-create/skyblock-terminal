@@ -22,6 +22,7 @@ public final class Keys {
         DEFAULTS.put("PORT", 296);
         DEFAULTS.put("FLIP", 297);
         DEFAULTS.put("LIST", 298);
+        DEFAULTS.put("ALGO", 299);
     }
 
     private Keys() {}

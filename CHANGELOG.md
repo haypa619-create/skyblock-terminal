@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+- ALGO (F10): trading model. Market-making signals with fair value (EWMA + book microprice), hourly volatility, fill-time from real insta-trade flow, a price-risk charge, and sizing capped by purse, inventory, daily limit and market flow. Ranks by risk-adjusted coins per hour; skips spikes, thin books and no-margin items. Trade selected fills the order ticket. Signals only, you place the orders.
+- BT <item>: backtests a fixed mean-reversion rule on years of daily history, with buy-and-hold and first/second-half comparisons. Optimistic fills, stated on the screen.
+
 ## 0.8.0
 - Years of history: 1M, 3M, 1Y and ALL charts now load daily candles back to 2020 from Coflnet's custom-range endpoint (loaded when you open the item, cached 6 hours), then 2-hour bars for the last week, then live recording. Drag and scroll to explore. The own 2-hour recording file is gone (no longer needed).
 

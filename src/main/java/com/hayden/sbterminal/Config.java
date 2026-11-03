@@ -48,6 +48,8 @@ public final class Config {
     /** Flip finder: share of the market's hourly volume you could realistically capture, and whether risky rows show. */
     public double flipShare = 0.05;
     public boolean flipRisky = false;
+    /** ALGO: share of the market flow you compete for, fraction of purse per trade, and how much price risk costs. */
+    public double algoShare = 0.3, algoPurseFrac = 0.25, algoRisk = 1.0;
     /** Flip finder: one inventory (36 slots x 64) is the most you can hold, and items cheaper than flipMinPrice are skipped. */
     public double flipInvUnits = 2304, flipMinPrice = 1000;
     /** Hotkeys you changed (action -> code, see Keys). Anything missing uses the default. */
