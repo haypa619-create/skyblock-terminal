@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5
+
+- Every key cap in the footer is now a button: GO, MENU, F1 to F4, F7, F5 and F6 can all be clicked, so navigation never depends on the keyboard.
+- KEYS command: echoes each key code the terminal receives, plus the frame rate, on the command line. Use it to see whether a key press arrives when one seems to be ignored.
+
 ## 0.5.4
 
 - Quantity chips scale with the item: 5%, 10%, 25% and 50% of what your purse can buy at the ticket price, rounded to clean numbers, so a 14M item gets 1, 2, 5, 10 and a 5-coin item gets thousands.

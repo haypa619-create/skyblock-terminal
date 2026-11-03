@@ -16,7 +16,7 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, ITEM, EMPTY }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, PORT, POS, ALERT, ALRT, PNL, SECT, CMP, LIMIT, KEYS, ITEM, EMPTY }
 
     /** Function codes, for the autocomplete dropdown. */
     public static final String[][] CODES = {
@@ -64,6 +64,7 @@ public final class Command {
                 Fn fn = Fn.valueOf(head);
                 return new Parsed(fn, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null);
             }
+            case "KEYS" -> { return simple(Fn.KEYS); }
             case "FONT" -> { return new Parsed(Fn.FONT, w.length > 1 ? w[1].toUpperCase(Locale.US) : "", null, null, List.of(), null); }
             case "SCR", "EQS", "SCREEN" -> {
                 List<Screener.Filter> fs = new ArrayList<>();

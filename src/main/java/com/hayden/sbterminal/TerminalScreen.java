@@ -64,6 +64,8 @@ public final class TerminalScreen extends Screen {
     private static int sel = 0, scroll = 0;
     private static List<String> pick = List.of();
     private static boolean restored = false;
+    /** KEYS command: echo every key code the screen receives, with the frame rate, to find lost key presses. */
+    private static boolean keyDebug = false;
     // order ticket (survives closing)
     private static Ticket.Side tSide = Ticket.Side.BUY;
     private static double tPrice = 0; // 0 = auto (join the best bid or ask)
@@ -298,14 +300,14 @@ public final class TerminalScreen extends Screen {
         int y = height - 13;
         gx.fill(0, y, width, height, BAR);
         int x = 4;
-        x = cap("GO", "Enter", GREEN, x, y);
-        x = cap("MENU", "Esc back", AMBER, x, y);
-        x = cap("F1", "HELP", YELLOW, x, y);
-        x = cap("F2", "MON", YELLOW, x, y);
-        x = cap("F3", "MOV", YELLOW, x, y);
-        x = cap("F4", "SCR", YELLOW, x, y);
-        x = cap("F7", "PORT", YELLOW, x, y);
-        if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y); x = cap("F6", "SELL", RED, x, y); cap("←→", "range", GRAY, x, y); }
+        x = cap("GO", "Enter", GREEN, x, y, this::enter);
+        x = cap("MENU", "Esc back", AMBER, x, y, this::escape);
+        x = cap("F1", "HELP", YELLOW, x, y, () -> go(View.HELP, null));
+        x = cap("F2", "MON", YELLOW, x, y, () -> go(View.MON, null));
+        x = cap("F3", "MOV", YELLOW, x, y, () -> go(View.MOV, null));
+        x = cap("F4", "SCR", YELLOW, x, y, () -> go(View.SCR, null));
+        x = cap("F7", "PORT", YELLOW, x, y, () -> go(View.PORT, null));
+        if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap("F6", "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y); }
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
         else if (view == View.SCR) cap("←→", "sort", GRAY, x, y);
         else if (view == View.MON) cap("Shift↑↓", "move", GRAY, x, y);
@@ -314,10 +316,23 @@ public final class TerminalScreen extends Screen {
     }
 
     private int cap(String key, String label, int color, int x, int y) {
+        return cap(key, label, color, x, y, null);
+    }
+
+    /** A key cap; with an action it is also a button, so every shortcut can be clicked instead. */
+    private int cap(String key, String label, int color, int x, int y, Runnable click) {
         int w = gx.w(key) + 6;
         gx.fill(x, y + 2, x + w, y + 12, color);
         gx.t(key, x + 3, y + 3, BLACK);
-        return gx.t(label, x + w + 4, y + 3, GRAY) + 10;
+        int end = gx.t(label, x + w + 4, y + 3, GRAY);
+        if (click != null) hits.add(new Hit(x, y + 1, end + 4, y + 13, click));
+        return end + 10;
+    }
+
+    private void escape() {
+        if (!cmd.isEmpty()) { cmd = ""; suggest = List.of(); }
+        else if (!back.isEmpty()) { Place pl = back.pop(); view = pl.view(); item = pl.item(); sel = 0; scroll = 0; status = ""; }
+        else onClose();
     }
 
     // ---------- toolbar actions per screen ----------
@@ -968,6 +983,7 @@ public final class TerminalScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent e) {
         int k = e.key();
+        if (keyDebug) status("key " + k + " received, " + Minecraft.getInstance().getFps() + " fps", AMBER);
         boolean dropdown = !suggest.isEmpty();
         if (e.hasControlDown() && k == 86) { // Ctrl+V
             String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
@@ -975,12 +991,7 @@ public final class TerminalScreen extends Screen {
             return true;
         }
         switch (k) {
-            case 256 -> { // Esc: clear, back, close
-                if (!cmd.isEmpty()) { cmd = ""; suggest = List.of(); }
-                else if (!back.isEmpty()) { Place pl = back.pop(); view = pl.view(); item = pl.item(); sel = 0; scroll = 0; }
-                else onClose();
-                return true;
-            }
+            case 256 -> { escape(); return true; } // Esc: clear, back, close
             case 259 -> { if (!cmd.isEmpty()) { cmd = cmd.substring(0, cmd.length() - 1); updateSuggestions(); } return true; }
             case 258 -> { if (dropdown) acceptSuggestion(); return true; } // Tab
             case 257, 335 -> { enter(); return true; }
@@ -1092,6 +1103,10 @@ public final class TerminalScreen extends Screen {
             case MOV -> go(View.MOV, null);
             case HELP -> go(View.HELP, null);
             case SCR -> { setScreen(c.filters(), Screener.Field.FLOW, true); go(View.SCR, null); }
+            case KEYS -> {
+                keyDebug = !keyDebug;
+                status(keyDebug ? "Key echo ON: every key press shows here with the FPS. KEYS turns it off." : "Key echo off", GREEN);
+            }
             case FONT -> {
                 if (c.item().equals("MC")) Terminal.CONFIG.monoFont = false;
                 else if (c.item().equals("MONO")) Terminal.CONFIG.monoFont = true;
