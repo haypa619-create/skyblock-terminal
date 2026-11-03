@@ -379,6 +379,7 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Open item", () -> { if (sel < rows.size()) open(rows.get(sel)); }));
                 a.add(new Action("Set cost", () -> { if (sel < rows.size()) { cmd = "POS " + Feed.name(rows.get(sel)) + " "; status("Type units and cost, e.g. 500 130.5", GRAY); } }));
                 a.add(new Action("Remove position", this::removeSelected));
+                a.add(new Action("Claim all", this::claimAll));
                 a.add(new Action("Reprice outbid", this::repriceFirstOutbid));
                 a.add(new Action("P&L history", () -> go(View.PNL, null)));
                 a.add(new Action("Clear orders", () -> { Terminal.PORT.orders.clear(); Terminal.PORT.save(); status("Cleared the tracked order list", GRAY); }));
@@ -1286,7 +1287,8 @@ public final class TerminalScreen extends Screen {
             Portfolio.Status st = Portfolio.status(o, mk);
             final String fid = id;
             if (mx >= 0 && my >= oy - 1 && my < oy + LH - 1) gx.fill(0, oy - 1, width, oy + LH - 1, HOVER);
-            hits.add(new Hit(0, oy - 1, width, oy + LH - 1, () -> { if (fid != null) open(fid); }));
+            final Portfolio.Order ro = o;
+            hits.add(new Hit(0, oy - 1, width, oy + LH - 1, () -> { if (ro.claimable) claim(ro); else if (fid != null) open(fid); }));
             gx.t(o.buy ? "BUY" : "SELL", 6, oy, o.buy ? GREEN : RED);
             gx.t(gx.fit(o.name, (int) (width * 0.26)), 6 + gx.cw() * 5, oy, WHITE);
             gx.tr(Fmt.qty(o.units) + " @ " + Fmt.px(o.price), (int) (width * 0.55), oy, GRAY);
@@ -1296,7 +1298,13 @@ public final class TerminalScreen extends Screen {
                 case BEHIND -> (o.buy ? "OUTBID, best " : "UNDERCUT, best ") + (mk == null ? "-" : Fmt.px(o.buy ? mk.bid() : mk.ask()));
             };
             gx.t(s, (int) (width * 0.58), oy, st == Portfolio.Status.TOP ? GREEN : st == Portfolio.Status.FILLED ? YELLOW : RED);
-            if (st == Portfolio.Status.BEHIND && fid != null) {
+            if (o.claimable) {
+                String b = " CLAIM ";
+                int bw = gx.w(b) + 2, bx = width - 6 - gx.w("99h 59m") - 8 - bw;
+                boolean hv = mx >= bx && mx < bx + bw && my >= oy - 1 && my < oy + LH - 1;
+                gx.fill(bx, oy - 1, bx + bw, oy + LH - 2, hv ? GREEN : 0xFF14661F);
+                gx.t(b, bx + 1, oy, hv ? BLACK : WHITE);
+            } else if (st == Portfolio.Status.BEHIND && fid != null) {
                 String b = " REPRICE ";
                 int bw = gx.w(b) + 2, bx = width - 6 - gx.w("99h 59m") - 8 - bw;
                 boolean hv = mx >= bx && mx < bx + bw && my >= oy - 1 && my < oy + LH - 1;
@@ -1307,6 +1315,22 @@ public final class TerminalScreen extends Screen {
             }
             gx.tr(Fmt.ago(now - o.at), width - 6, oy, DIM);
         }
+    }
+
+    /** Opens /bz and lights up Manage Orders, then the order to claim. Clicking an order there claims it. */
+    private void claim(Portfolio.Order o) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getConnection() == null) { status("Not connected to a server.", RED); return; }
+        onClose();
+        Guide.launch(new Ticket.Active("", o == null ? "" : o.name, o == null || o.buy ? Ticket.Side.BUY : Ticket.Side.SELL,
+                Ticket.Mode.CLAIM, 0, 0, System.currentTimeMillis()));
+    }
+
+    private void claimAll() {
+        boolean any = false;
+        for (Portfolio.Order o : Terminal.PORT.orderList()) if (o.claimable) any = true;
+        if (!any) { status("Nothing to claim right now", GRAY); return; }
+        claim(null);
     }
 
     private void repriceFirstOutbid() {

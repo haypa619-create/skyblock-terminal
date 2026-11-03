@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.7
+
+- Claim from the portfolio: filled orders get a green CLAIM button, and clicking the row (or "claim it") now starts a guide instead of opening the item. It runs /bz, lights up Manage Orders, then the filled order. Clicking that order in Hypixel's menu claims it. "Claim all" in the toolbar does every filled order in turn and stops when none are left.
+
 ## 0.5.6
 
 - Esc closes the terminal in one press from any screen. It used to step back through every screen and click you had made. If you have typed something, the first Esc clears it.

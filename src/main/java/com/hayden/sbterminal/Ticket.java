@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
  */
 public final class Ticket {
     public enum Side { BUY, SELL }
-    public enum Mode { ORDER, INSTA, SYNC, CANCEL }
+    public enum Mode { ORDER, INSTA, SYNC, CANCEL, CLAIM }
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
     /** itemName is the Bazaar display name; amount 0 = not needed (sell offers use what you hold). */
@@ -126,6 +126,17 @@ public final class Ticket {
         String item = a.itemName().toLowerCase(Locale.US);
 
         if (a.mode() == Mode.SYNC) return t.contains("bazaar orders") ? -1 : find(names, "manage orders", false);
+        if (a.mode() == Mode.CLAIM) {
+            // Bazaar > Manage Orders > the order with something to claim (clicking it claims)
+            if (t.contains("bazaar orders")) {
+                for (int k = 0; k < names.size(); k++) {
+                    Sync.Order o = Sync.parse(names.get(k), lores == null || k >= lores.size() ? null : lores.get(k));
+                    if (o != null && claimMatches(o, a)) return k;
+                }
+                return -1;
+            }
+            return find(names, "manage orders", false);
+        }
         if (a.mode() == Mode.CANCEL) {
             // Bazaar > Manage Orders > your order (matched by side, name and old price) > Cancel Order
             int c = find(names, "cancel order", false);
@@ -172,6 +183,12 @@ public final class Ticket {
         i = find(names, buy ? "create buy order" : "create sell offer", false);
         if (i >= 0) return i;
         return find(names, item, true);
+    }
+
+    /** Whether a Manage Orders entry is a claimable order this CLAIM ticket is after (empty name = any). */
+    public static boolean claimMatches(Sync.Order o, Active a) {
+        if (!o.claimable()) return false;
+        return a.itemName().isEmpty() || o.buy() == (a.side() == Side.BUY) && o.name().equalsIgnoreCase(a.itemName());
     }
 
     private static double loreNumber(List<List<String>> lores, int k, Pattern p) {

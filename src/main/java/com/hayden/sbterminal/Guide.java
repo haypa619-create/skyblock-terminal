@@ -99,7 +99,7 @@ public final class Guide {
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() == null) return;
         TICKET.start(a);
-        mc.getConnection().sendCommand(a.mode() == Ticket.Mode.CANCEL ? "bz" : "bz " + a.itemName());
+        mc.getConnection().sendCommand(a.mode() == Ticket.Mode.CANCEL || a.mode() == Ticket.Mode.CLAIM ? "bz" : "bz " + a.itemName());
     }
 
     /** How many of an item you carry (for sell offers, which list everything you hold). */
@@ -155,6 +155,11 @@ public final class Guide {
             String sig = orders.toString();
             Ticket.Active a = TICKET.current(System.currentTimeMillis());
             if (a != null && a.mode() == Ticket.Mode.SYNC) TICKET.clear();
+            if (a != null && a.mode() == Ticket.Mode.CLAIM) {
+                boolean any = false;
+                for (Sync.Order o : orders) if (Ticket.claimMatches(o, a)) any = true;
+                if (!any) TICKET.clear(); // nothing left to claim
+            }
             if (sig.equals(lastSig[0])) return;
             lastSig[0] = sig;
             Terminal.PORT.syncFrom(orders, System.currentTimeMillis());
@@ -212,6 +217,11 @@ public final class Guide {
         Minecraft mc = Minecraft.getInstance();
         Slot target = greenSlot(screen);
         Ticket.Active a = TICKET.current(System.currentTimeMillis());
+        if (target == null && a != null && (a.mode() == Ticket.Mode.CLAIM || a.mode() == Ticket.Mode.CANCEL)
+                && !Sync.isOrdersTitle(screen.getTitle().getString()) && mc.getConnection() != null && debounce()) {
+            mc.getConnection().sendCommand("bz");
+            return;
+        }
         if (target == null && a != null && (a.mode() == Ticket.Mode.ORDER || a.mode() == Ticket.Mode.INSTA)
                 && mc.getConnection() != null && debounce()) {
             // Nothing to click here (e.g. still in Manage Orders after a reprice cancel): one Enter = one /bz.
@@ -240,6 +250,14 @@ public final class Guide {
             } else if (Sync.isOrdersTitle(screen.getTitle().getString())) msg = "Reading your orders...";
             else msg = "Open the main Bazaar page to sync your orders";
             g.centeredText(mc.font, Component.literal(msg).withStyle(ChatFormatting.AQUA), screen.width / 2, 8, 0xFFFFFFFF);
+            return;
+        }
+        if (a.mode() == Ticket.Mode.CLAIM) {
+            String what2 = a.itemName().isEmpty() ? "your filled orders" : a.itemName();
+            String msg = target != null ? "Claim " + what2 + ": click the green slot (or press Enter)"
+                    : Sync.isOrdersTitle(screen.getTitle().getString()) ? "Nothing left to claim" : "Claim " + what2 + ": open Manage Orders (Enter)";
+            if (target != null) drawGreen(screen, g, target);
+            g.centeredText(mc.font, Component.literal(msg).withStyle(ChatFormatting.GREEN), screen.width / 2, 8, 0xFFFFFFFF);
             return;
         }
         if (a.mode() == Ticket.Mode.CANCEL) {
