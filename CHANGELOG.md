@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.0
+
+- Daily limit: every order and insta-trade you place is added up per day. The header shows LIMIT used/15B, the ticket shows what is left and blocks an order that would pass it. LIMIT 15B changes it.
+- Portfolio shows coins LOCKED in open buy orders.
+- Reprice: outbid or undercut orders get a REPRICE button (and a toolbar action). The guide walks you through cancelling the old order in Manage Orders, then one Enter opens the item and the rest is re-placed at the best price. You click every step.
+- Price alerts: ALERT coal < 120, also BID, ASK, SPR (spread %) and CHG1H. Fires once in chat with a sound; ALRT lists, deletes and re-arms them.
+- Fill times: how long your orders took to fill, median per item and side, on the item page.
+- P&L history (PNL): cumulative realized P&L chart, P&L by day, by item with trade count and win rate.
+- Ticket: break-even sell price after tax, P&L if you flipped at the current ask, your cost and P&L for sell offers, limit left.
+- Compare (CMP item): overlay a second item on the chart as % change from the start of the range.
+- Sectors (SECT): Farming, Mining, Gemstones, Combat, Woods & Fishes, Enchantments, Essence, Oddities with flow-weighted 1h and 24h moves; Enter drills into a sector.
+
 ## 0.4.1
 
 - Orders now sync from the real Manage Orders menu. It is read whenever you open it, and the list is replaced with exactly what Hypixel shows (partial fills and claimable amounts included).

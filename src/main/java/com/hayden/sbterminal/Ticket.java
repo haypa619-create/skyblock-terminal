@@ -12,11 +12,15 @@ import java.util.regex.Pattern;
  */
 public final class Ticket {
     public enum Side { BUY, SELL }
-    public enum Mode { ORDER, INSTA, SYNC }
+    public enum Mode { ORDER, INSTA, SYNC, CANCEL }
     public enum Field { AMOUNT, PRICE, UNKNOWN }
 
     /** itemName is the Bazaar display name; amount 0 = not needed (sell offers use what you hold). */
-    public record Active(String id, String itemName, Side side, Mode mode, double price, long amount, long createdAt) {}
+    public record Active(String id, String itemName, Side side, Mode mode, double price, long amount, long createdAt, double oldPrice) {
+        public Active(String id, String itemName, Side side, Mode mode, double price, long amount, long createdAt) {
+            this(id, itemName, side, mode, price, amount, createdAt, 0);
+        }
+    }
 
     public static final long TTL_MS = 5 * 60 * 1000;
     public static final long GAP_MS = 2000;
@@ -39,7 +43,7 @@ public final class Ticket {
 
     public void reprice(double price, long now) {
         Active a = active;
-        if (a != null) active = new Active(a.id(), a.itemName(), a.side(), a.mode(), price, a.amount(), now);
+        if (a != null) active = new Active(a.id(), a.itemName(), a.side(), a.mode(), price, a.amount(), now, a.oldPrice());
     }
 
     // ---------- numbers ----------
@@ -122,6 +126,23 @@ public final class Ticket {
         String item = a.itemName().toLowerCase(Locale.US);
 
         if (a.mode() == Mode.SYNC) return t.contains("bazaar orders") ? -1 : find(names, "manage orders", false);
+        if (a.mode() == Mode.CANCEL) {
+            // Bazaar > Manage Orders > your order (matched by side, name and old price) > Cancel Order
+            int c = find(names, "cancel order", false);
+            if (c < 0) c = find(names, "cancel offer", false);
+            if (c >= 0) return c;
+            if (t.contains("bazaar orders")) {
+                int loose = -1;
+                for (int k = 0; k < names.size(); k++) {
+                    Sync.Order o = Sync.parse(names.get(k), lores == null || k >= lores.size() ? null : lores.get(k));
+                    if (o == null || o.buy() != buy || !o.name().equalsIgnoreCase(a.itemName())) continue;
+                    if (Math.abs(o.price() - a.oldPrice()) < 0.05) return k;
+                    if (loose < 0) loose = k;
+                }
+                return loose;
+            }
+            return find(names, "manage orders", false);
+        }
 
         if (a.mode() == Mode.INSTA) {
             int c = t.contains("confirm") ? find(names, "confirm", false) : -1;

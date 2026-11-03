@@ -84,6 +84,12 @@ public final class Guide {
                 TICKET.clear();
             } else if (t.startsWith("[Bazaar] Your price isn't competitive enough")) {
                 onRejected(a);
+            } else if (a.mode() == Ticket.Mode.CANCEL && t.startsWith("[Bazaar] Cancelled!")) {
+                // Reprice, step 2: the old order is down. Put it back up at the best price right now.
+                Market.Product p = Feed.snapshot.get(a.id());
+                double price = p == null ? a.price() : Ticket.joinPrice(a.side(), p.bid(), p.ask());
+                TICKET.start(new Ticket.Active(a.id(), a.itemName(), a.side(), Ticket.Mode.ORDER, price, a.amount(), System.currentTimeMillis()));
+                say("Cancelled. Press Enter to put it back up at " + Ticket.formatPrice(price) + ".");
             }
         });
     }
@@ -93,7 +99,7 @@ public final class Guide {
         Minecraft mc = Minecraft.getInstance();
         if (mc.getConnection() == null) return;
         TICKET.start(a);
-        mc.getConnection().sendCommand("bz " + a.itemName());
+        mc.getConnection().sendCommand(a.mode() == Ticket.Mode.CANCEL ? "bz" : "bz " + a.itemName());
     }
 
     /** How many of an item you carry (for sell offers, which list everything you hold). */
@@ -205,6 +211,13 @@ public final class Guide {
     private static void clickGreenSlot(AbstractContainerScreen<?> screen) {
         Minecraft mc = Minecraft.getInstance();
         Slot target = greenSlot(screen);
+        Ticket.Active a = TICKET.current(System.currentTimeMillis());
+        if (target == null && a != null && (a.mode() == Ticket.Mode.ORDER || a.mode() == Ticket.Mode.INSTA)
+                && mc.getConnection() != null && debounce()) {
+            // Nothing to click here (e.g. still in Manage Orders after a reprice cancel): one Enter = one /bz.
+            mc.getConnection().sendCommand("bz " + a.itemName());
+            return;
+        }
         if (target == null || mc.gameMode == null || mc.player == null || !debounce()) return;
         mc.gameMode.handleContainerInput(screen.getMenu().containerId, target.index, 0, ContainerInput.PICKUP, mc.player);
     }
@@ -229,10 +242,17 @@ public final class Guide {
             g.centeredText(mc.font, Component.literal(msg).withStyle(ChatFormatting.AQUA), screen.width / 2, 8, 0xFFFFFFFF);
             return;
         }
+        if (a.mode() == Ticket.Mode.CANCEL) {
+            String msg = target == null ? "Reprice " + a.itemName() + ": open Manage Orders"
+                    : "Reprice " + a.itemName() + ": click the green slot to cancel the old order (or press Enter)";
+            if (target != null) drawGreen(screen, g, target);
+            g.centeredText(mc.font, Component.literal(msg).withStyle(ChatFormatting.GOLD), screen.width / 2, 8, 0xFFFFFFFF);
+            return;
+        }
         String what = (a.mode() == Ticket.Mode.INSTA ? (a.side() == Ticket.Side.BUY ? "Buy now " : "Sell now ")
                 : a.side() == Ticket.Side.BUY ? "Buy order " : "Sell offer ") + a.itemName();
         if (target == null) {
-            g.centeredText(mc.font, Component.literal(what + ": waiting for the next menu").withStyle(ChatFormatting.GRAY), screen.width / 2, 8, 0xFFFFFFFF);
+            g.centeredText(mc.font, Component.literal(what + ": press Enter to open it in the Bazaar").withStyle(ChatFormatting.GRAY), screen.width / 2, 8, 0xFFFFFFFF);
             return;
         }
         ContainerScreenAccessor acc = (ContainerScreenAccessor) screen;
@@ -247,6 +267,16 @@ public final class Guide {
         String qty = a.side() == Ticket.Side.BUY && a.amount() > 0 ? " x" + a.amount() : "";
         g.centeredText(mc.font, Component.literal(what + qty + price + ": click the green slot (or press Enter)").withStyle(ChatFormatting.GREEN),
                 screen.width / 2, 8, 0xFFFFFFFF);
+    }
+
+    private static void drawGreen(AbstractContainerScreen<?> screen, GuiGraphicsExtractor g, Slot target) {
+        ContainerScreenAccessor acc = (ContainerScreenAccessor) screen;
+        int x = acc.sbterminal$getLeftPos() + target.x, y = acc.sbterminal$getTopPos() + target.y;
+        double t = (System.currentTimeMillis() % 1000) / 1000.0;
+        int alpha = 0x60 + (int) (0x50 * (0.5 + 0.5 * Math.sin(t * 2 * Math.PI)));
+        g.fill(x, y, x + 16, y + 16, (alpha << 24) | 0x55FF55);
+        g.outline(x - 2, y - 2, 20, 20, 0xFF55FF55);
+        g.outline(x - 1, y - 1, 18, 18, 0xFF55FF55);
     }
 
     private static void addButtons(Screen screen) {

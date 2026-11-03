@@ -77,6 +77,7 @@ public final class Terminal implements ClientModInitializer {
             if (pressed) mc.gui.setScreen(new TerminalScreen());
             if (++ticks % 20 == 0) readPurse(mc);
             if (ticks % 40 == 0 && CONFIG.alerts) checkOutbid(mc);
+            if (ticks % 40 == 20) checkPriceAlerts(mc);
         });
 
         // Hover any item in any menu or your inventory and press B: open it in the terminal.
@@ -122,6 +123,24 @@ public final class Terminal implements ClientModInitializer {
             }
         }
         outbid.retainAll(behind);
+    }
+
+    /** Price alerts: each fires once, then waits to be re-armed in ALRT. */
+    private static void checkPriceAlerts(Minecraft mc) {
+        if (mc.player == null) return;
+        boolean changed = false;
+        for (Alerts.Rule r : CONFIG.priceAlerts) {
+            if (r.fired) continue;
+            Market.Product p = Feed.snapshot.get(r.id);
+            double x = Alerts.value(r.f(), p, Feed.change(r.id, 3_600_000L));
+            if (!Alerts.test(r.op, x, r.value)) continue;
+            r.fired = true;
+            r.firedAt = System.currentTimeMillis();
+            changed = true;
+            String now = r.f() == Alerts.Field.SPR || r.f() == Alerts.Field.CHG1H ? String.format(java.util.Locale.US, "%.1f%%", x) : Fmt.px(x);
+            alert("ALERT " + Feed.name(r.id) + ": " + r.describe() + " (now " + now + ")", false);
+        }
+        if (changed) CONFIG.save();
     }
 
     static void alert(String text, boolean bad) {

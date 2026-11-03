@@ -28,6 +28,13 @@ public final class Portfolio {
         public double units, cost; // cost = average price per unit
     }
 
+    /** A closed sale against tracked cost. */
+    public static final class Trade {
+        public String name;
+        public long at;
+        public double units, cost, price, pnl;
+    }
+
     public static final class Order {
         public String name;
         public boolean buy, filled;
@@ -45,6 +52,11 @@ public final class Portfolio {
     public double untrackedUnits = 0;
     /** When Manage Orders last replaced the order list (0 = never). */
     public long syncedAt = 0;
+    /** yyyy-MM-dd -> coins of orders placed and insta-trades (for the daily Bazaar limit). */
+    public Map<String, Double> placed = new LinkedHashMap<>();
+    public List<Trade> trades = new ArrayList<>();
+    /** "B:item" / "S:item" -> how long orders took to fill, newest last (ms). */
+    public Map<String, List<Long>> fills = new LinkedHashMap<>();
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private transient Path file;
@@ -71,6 +83,9 @@ public final class Portfolio {
         if (p.positions == null) p.positions = new LinkedHashMap<>();
         if (p.orders == null) p.orders = new ArrayList<>();
         if (p.daily == null) p.daily = new LinkedHashMap<>();
+        if (p.placed == null) p.placed = new LinkedHashMap<>();
+        if (p.trades == null) p.trades = new ArrayList<>();
+        if (p.fills == null) p.fills = new LinkedHashMap<>();
         p.file = f;
         return p;
     }
@@ -114,11 +129,17 @@ public final class Portfolio {
             o.price = num(m.group(4)) / u;
             o.at = now;
             orders.add(o);
+            placed.merge(day(now), num(m.group(4)), Double::sum);
             return true;
         }
         if ((m = FILLED.matcher(line)).matches()) {
             Order o = find(m.group(3), m.group(1).startsWith("Buy"), false);
             if (o == null) return false;
+            if (o.at > 0 && now > o.at) {
+                List<Long> l = fills.computeIfAbsent((o.buy ? "B:" : "S:") + key(o.name), k -> new ArrayList<>());
+                l.add(now - o.at);
+                while (l.size() > 30) l.remove(0);
+            }
             o.filled = true;
             o.claimable = true;
             o.filledUnits = o.units;
@@ -155,12 +176,14 @@ public final class Portfolio {
             double u = num(m.group(1));
             if (u <= 0) return false;
             addUnits(m.group(2), u, num(m.group(3)) / u);
+            placed.merge(day(now), num(m.group(3)), Double::sum);
             return true;
         }
         if ((m = INSTA_SELL.matcher(line)).matches()) {
             double u = num(m.group(1));
             if (u <= 0) return false;
             sellUnits(m.group(2), u, num(m.group(3)), now);
+            placed.merge(day(now), num(m.group(3)), Double::sum);
             return true;
         }
         return false;
@@ -198,6 +221,15 @@ public final class Portfolio {
             double pnl = coins * (tracked / units) - p.cost * tracked;
             realizedAll += pnl;
             daily.merge(day(now), pnl, Double::sum);
+            Trade t = new Trade();
+            t.name = p.name;
+            t.at = now;
+            t.units = tracked;
+            t.cost = p.cost;
+            t.price = coins / units;
+            t.pnl = pnl;
+            trades.add(t);
+            while (trades.size() > 2000) trades.remove(0);
             p.units -= tracked;
             if (p.units < 0.5) positions.remove(key(name));
         }
@@ -244,6 +276,28 @@ public final class Portfolio {
     public synchronized List<Pos> positionList() { return new ArrayList<>(positions.values()); }
 
     public synchronized List<Order> orderList() { return new ArrayList<>(orders); }
+
+    // ---------- limit, locked coins, fill times ----------
+
+    public synchronized double placedOn(String day) { return placed.getOrDefault(day, 0.0); }
+
+    /** Coins sitting in buy orders that have not filled yet. */
+    public synchronized double lockedInBuys() {
+        double s = 0;
+        for (Order o : orders) if (o.buy && !o.filled) s += Math.max(0, o.units - o.filledUnits) * o.price;
+        return s;
+    }
+
+    /** {median ms, count} of your past fills for this item and side, or null. */
+    public synchronized long[] fillTime(String name, boolean buy) {
+        List<Long> l = fills.get((buy ? "B:" : "S:") + key(name));
+        if (l == null || l.isEmpty()) return null;
+        List<Long> s = new ArrayList<>(l);
+        s.sort(null);
+        return new long[]{s.get(s.size() / 2), s.size()};
+    }
+
+    public synchronized List<Trade> tradeList() { return new ArrayList<>(trades); }
 
     // ---------- order status ----------
 

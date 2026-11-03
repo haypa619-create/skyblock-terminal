@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.function.ToDoubleFunction;
 
@@ -40,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, ITEM, PORT, HELP, PICK }
+    enum View { MON, MOV, SCR, ITEM, PORT, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -66,6 +67,10 @@ public final class TerminalScreen extends Screen {
     // order ticket (survives closing)
     private static Ticket.Side tSide = Ticket.Side.BUY;
     private static double tPrice = 0; // 0 = auto (join the best bid or ask)
+    /** Item overlaid on the chart (CMP), or null. */
+    private static String cmpItem = null;
+    /** Sector being drilled into (SECX). */
+    private static String sector = "Mining";
 
     // ---- per-screen ----
     private String cmd = "";
@@ -163,6 +168,10 @@ public final class TerminalScreen extends Screen {
             case SCR -> drawScreener(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
+            case PNL -> drawPnl(y, bottom, mx, my);
+            case ALRT -> drawAlerts(y, bottom, mx, my);
+            case SECT -> drawSectors(y, bottom, mx, my);
+            case SECX -> drawSectorItems(y, bottom, mx, my);
             case HELP -> drawHelp(y, bottom);
             case PICK -> drawPick(y, bottom, mx, my);
         }
@@ -179,6 +188,8 @@ public final class TerminalScreen extends Screen {
         gx.t(gx.fit(screenTitle(), width / 2 - x), x, 3, WHITE);
         StringBuilder r = new StringBuilder();
         if (Terminal.purse >= 0) r.append("PURSE ").append(Fmt.px(Terminal.purse)).append("  ");
+        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
+        if (used > 0) r.append("LIMIT ").append(Fmt.px(used)).append("/").append(Fmt.px(Terminal.CONFIG.dailyLimit)).append("  ");
         Market.Snapshot s = Feed.snapshot;
         if (s.hypixelUpdated() > 0) r.append("DATA ").append(Fmt.ago(System.currentTimeMillis() - s.hypixelUpdated())).append("  ");
         r.append(LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")));
@@ -192,6 +203,9 @@ public final class TerminalScreen extends Screen {
             case SCR -> "SCR";
             case ITEM -> "DES";
             case PORT -> "PORT";
+            case PNL -> "PNL";
+            case ALRT -> "ALRT";
+            case SECT, SECX -> "SECT";
             case HELP -> "HELP";
             case PICK -> "FIND";
         };
@@ -204,6 +218,10 @@ public final class TerminalScreen extends Screen {
             case SCR -> "Screener";
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
+            case PNL -> "P&L history";
+            case ALRT -> "Alerts";
+            case SECT -> "Sectors";
+            case SECX -> sector + " sector";
             case HELP -> "Help";
             case PICK -> "Item search";
         };
@@ -309,6 +327,11 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Sell now", () -> { tSide = Ticket.Side.SELL; placeTicket(true); }));
                 a.add(new Action(on ? "Remove from MON" : "Add to MON", () -> toggleWatch(item)));
                 a.add(new Action("Copy price", () -> copyPrice(tSide == Ticket.Side.BUY)));
+                a.add(new Action("Alert", () -> { cmd = "ALERT " + Feed.name(item) + " < "; status("Type the price and press Enter (or BID/ASK/SPR/CHG1H before the < or >)", GRAY); }));
+                a.add(new Action(cmpItem == null ? "Compare" : "Stop compare", () -> {
+                    if (cmpItem != null) cmpItem = null;
+                    else { cmd = "CMP "; status("Type the item to compare with and press Enter", GRAY); }
+                }));
                 for (Command.Range r : Command.Range.values()) a.add(new Action(r.label, () -> range = r));
             }
             case MON -> {
@@ -322,8 +345,19 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Open item", () -> { if (sel < rows.size()) open(rows.get(sel)); }));
                 a.add(new Action("Set cost", () -> { if (sel < rows.size()) { cmd = "POS " + Feed.name(rows.get(sel)) + " "; status("Type units and cost, e.g. 500 130.5", GRAY); } }));
                 a.add(new Action("Remove position", this::removeSelected));
+                a.add(new Action("Reprice outbid", this::repriceFirstOutbid));
+                a.add(new Action("P&L history", () -> go(View.PNL, null)));
                 a.add(new Action("Clear orders", () -> { Terminal.PORT.orders.clear(); Terminal.PORT.save(); status("Cleared the tracked order list", GRAY); }));
             }
+            case ALRT -> {
+                a.add(new Action("New alert", () -> { cmd = "ALERT "; status("e.g. ALERT enchanted coal < 120   or   ALERT coal SPR > 5", GRAY); }));
+                a.add(new Action("Delete", this::deleteAlert));
+                a.add(new Action("Re-arm", () -> rearm(false)));
+                a.add(new Action("Re-arm all", () -> rearm(true)));
+                a.add(new Action("Clear fired", () -> { Terminal.CONFIG.priceAlerts.removeIf(r -> r.fired); Terminal.CONFIG.save(); }));
+            }
+            case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
+            case SECX -> a.add(new Action("All sectors", () -> go(View.SECT, null)));
             case MOV -> {
                 a.add(new Action("24 hours", () -> { moversDay = true; sel = 0; scroll = 0; }));
                 a.add(new Action("1 hour", () -> { moversDay = false; sel = 0; scroll = 0; }));
@@ -509,11 +543,12 @@ public final class TerminalScreen extends Screen {
         x = pair("1D ", Fmt.pct(c24), x, top + 2, changeColor(c24));
         pair("1W ", Fmt.pct(c7), x, top + 2, changeColor(c7));
         int y = top + LH + 4;
-        int statsH = 5 * LH + 8;
+        int statsH = 6 * LH + 8;
         int chartH = Math.max(60, bottom - y - statsH - 4);
-        drawChart(p, 4, y, leftW, chartH, now, mx, my);
+        if (cmpItem != null && !cmpItem.equals(item)) drawCompare(4, y, leftW, chartH, now, mx, my);
+        else drawChart(p, 4, y, leftW, chartH, now, mx, my);
         drawStats(p, 4, y + chartH + 4, leftW, now);
-        int ticketH = 10 * LH + 8;
+        int ticketH = 13 * LH + 8;
         int bookH = Math.max(6 * LH, bottom - y - ticketH - 4);
         drawBook(p, width - bookW - 4, y, bookW, bookH);
         drawTicket(p, width - bookW - 4, y + bookH + 4, bookW, bottom - (y + bookH + 4), mx, my);
@@ -634,15 +669,22 @@ public final class TerminalScreen extends Screen {
                 {"Insta-buys 7d", Fmt.qty(p.instaBuyWeek())}, {"Insta-sells 7d", Fmt.qty(p.instaSellWeek())},
                 {"Buy orders", p.bidOrders() + " / " + Fmt.qty(p.bidUnits()) + " units"}, {"Sell offers", p.askOrders() + " / " + Fmt.qty(p.askUnits()) + " units"},
                 {"Buy / sell pressure", pressure(p)}, {"Top bid size", p.bidLevels().length >= 3 ? Fmt.qty(p.bidLevels()[1]) + " in " + (int) p.bidLevels()[2] + " ord" : "-"},
+                {"Your buy fills", fillText(true)}, {"Your sell fills", fillText(false)},
         };
-        gx.fill(x, y, x + w, y + 5 * LH + 6, PANEL);
-        gx.box(x, y, w, 5 * LH + 6, LINE);
+        int rowsN = (cells.length + 1) / 2;
+        gx.fill(x, y, x + w, y + rowsN * LH + 6, PANEL);
+        gx.box(x, y, w, rowsN * LH + 6, LINE);
         int colW = w / 2;
         for (int i = 0; i < cells.length; i++) {
             int cx = x + 6 + (i % 2) * colW, cy = y + 4 + (i / 2) * LH;
             gx.t(cells[i][0], cx, cy, AMBER_DIM);
             gx.tr(cells[i][1], cx + colW - 14, cy, WHITE);
         }
+    }
+
+    private String fillText(boolean buy) {
+        long[] f = Terminal.PORT.fillTime(Feed.name(item), buy);
+        return f == null ? "no data yet" : "median " + Fmt.ago(f[0]) + " (" + f[1] + ")";
     }
 
     private static String pressure(Market.Product p) {
@@ -695,6 +737,10 @@ public final class TerminalScreen extends Screen {
                 {"QTY 5k / PX 123.4", "ticket quantity and price (PX AUTO = join the best bid or ask)"},
                 {"PORT / F7", "portfolio: positions, cost, P&L, open orders (built from Bazaar chat)"},
                 {"POS coal 500 130.5", "set a position by hand (units 0 removes it)"},
+                {"ALERT coal < 120", "alert once in chat (also BID ASK SPR CHG1H). ALRT lists them"},
+                {"PNL / SECT", "P&L history / sector index moves"},
+                {"CMP coal", "on an item page: overlay another item (% change). CMP alone clears"},
+                {"LIMIT 15B", "your daily Bazaar limit (the ticket checks it)"},
                 {"FONT MONO / FONT MC", "terminal font or Minecraft font"},
                 {"2 <GO>", "run toolbar action 2 (or click it)"},
                 {"", ""},
@@ -913,7 +959,7 @@ public final class TerminalScreen extends Screen {
             case 268 -> { sel = 0; return true; }
             case 269 -> { sel = Math.max(0, rows.size() - 1); return true; }
             case 263, 262 -> { horizontal(k == 262 ? 1 : -1); return true; }
-            case 261 -> { if (view == View.MON || view == View.PORT) removeSelected(); return true; }
+            case 261 -> { if (view == View.MON || view == View.PORT) removeSelected(); else if (view == View.ALRT) deleteAlert(); return true; }
             case 290 -> { go(View.HELP, null); return true; }
             case 291 -> { go(View.MON, null); return true; }
             case 292 -> { go(View.MOV, null); return true; }
@@ -949,7 +995,8 @@ public final class TerminalScreen extends Screen {
             return;
         }
         if (view == View.ITEM) placeTicket(false);
-        else if (sel < rows.size()) open(rows.get(sel));
+        else if (view == View.SECT) openSector(sel);
+        else if (sel < rows.size() && Feed.snapshot.get(rows.get(sel)) != null) open(rows.get(sel));
     }
 
     @Override
@@ -1023,6 +1070,27 @@ public final class TerminalScreen extends Screen {
                 else { pick = m; go(View.PICK, null); }
             }
             case PORT -> go(View.PORT, null);
+            case PNL -> go(View.PNL, null);
+            case ALRT -> go(View.ALRT, null);
+            case SECT -> go(View.SECT, null);
+            case ALERT -> addAlert(c.item());
+            case CMP -> {
+                if (c.item().isEmpty()) { cmpItem = null; status("Compare off", GRAY); return; }
+                List<String> m = find(c.item());
+                if (m.isEmpty()) { status("No Bazaar item matches \"" + c.item() + "\"", RED); return; }
+                cmpItem = m.get(0);
+                Feed.day(cmpItem);
+                Feed.week(cmpItem);
+                if (view != View.ITEM) { status("Open an item, then CMP shows both on its chart", GRAY); return; }
+                status("Comparing with " + Feed.name(cmpItem) + " (% change from the start of the range). CMP alone clears.", GREEN);
+            }
+            case LIMIT -> {
+                double v = Ticket.parseNum(c.item());
+                if (v <= 0) { status("LIMIT 15B (now " + Fmt.px(Terminal.CONFIG.dailyLimit) + ")", GRAY); return; }
+                Terminal.CONFIG.dailyLimit = v;
+                Terminal.CONFIG.save();
+                status("Daily limit " + Fmt.px(v), GREEN);
+            }
             case POS -> posCommand(c.item());
             case BUY, SELL -> ticketCommand(c);
             case QTY -> {
@@ -1098,6 +1166,7 @@ public final class TerminalScreen extends Screen {
         x = pair("UNREAL ", signed(unreal), x, top + 2, changeColor(unreal));
         x = pair("TODAY ", signed(today), x, top + 2, changeColor(today));
         x = pair("ALL TIME ", signed(Terminal.PORT.realizedAll), x, top + 2, changeColor(Terminal.PORT.realizedAll));
+        x = pair("LOCKED ", Fmt.px(Terminal.PORT.lockedInBuys()), x, top + 2, GRAY);
         if (Terminal.purse >= 0) pair("PURSE ", Fmt.px(Terminal.purse), x, top + 2, AMBER);
 
         List<Portfolio.Order> os = Terminal.PORT.orderList();
@@ -1162,11 +1231,348 @@ public final class TerminalScreen extends Screen {
                 case BEHIND -> (o.buy ? "OUTBID, best " : "UNDERCUT, best ") + (mk == null ? "-" : Fmt.px(o.buy ? mk.bid() : mk.ask()));
             };
             gx.t(s, (int) (width * 0.58), oy, st == Portfolio.Status.TOP ? GREEN : st == Portfolio.Status.FILLED ? YELLOW : RED);
+            if (st == Portfolio.Status.BEHIND && fid != null) {
+                String b = " REPRICE ";
+                int bw = gx.w(b) + 2, bx = width - 6 - gx.w("99h 59m") - 8 - bw;
+                boolean hv = mx >= bx && mx < bx + bw && my >= oy - 1 && my < oy + LH - 1;
+                gx.fill(bx, oy - 1, bx + bw, oy + LH - 2, hv ? AMBER : TOOLBAR);
+                gx.t(b, bx + 1, oy, hv ? BLACK : WHITE);
+                final Portfolio.Order fo = o;
+                hits.add(new Hit(bx, oy - 1, bx + bw, oy + LH - 1, () -> reprice(fo)));
+            }
             gx.tr(Fmt.ago(now - o.at), width - 6, oy, DIM);
         }
     }
 
+    private void repriceFirstOutbid() {
+        for (Portfolio.Order o : Terminal.PORT.orderList()) {
+            String id = Feed.idForName(o.name);
+            if (id != null && Portfolio.status(o, Feed.snapshot.get(id)) == Portfolio.Status.BEHIND) { reprice(o); return; }
+        }
+        status("No outbid or undercut orders right now", GRAY);
+    }
+
+    /** Cancel the old order, then put the rest back up at the best price. Two guided steps, you click both. */
+    private void reprice(Portfolio.Order o) {
+        String id = Feed.idForName(o.name);
+        Market.Product p = id == null ? null : Feed.snapshot.get(id);
+        Minecraft mc = Minecraft.getInstance();
+        if (p == null || mc.getConnection() == null) { status("No live data for " + o.name, RED); return; }
+        Ticket.Side side = o.buy ? Ticket.Side.BUY : Ticket.Side.SELL;
+        double price = Ticket.joinPrice(side, p.bid(), p.ask());
+        long left = (long) Math.max(1, o.units - o.filledUnits);
+        onClose();
+        Guide.launch(new Ticket.Active(id, o.name, side, Ticket.Mode.CANCEL, price, left, System.currentTimeMillis(), o.price));
+    }
+
     private static String signed(double v) { return (v >= 0 ? "+" : "-") + Fmt.px(Math.abs(v)); }
+
+    // ---------- compare (CMP) ----------
+
+    private List<Bars.Point> seriesFor(String id, long now) {
+        List<Bars.Point> src;
+        if (range == Command.Range.W1 || range == Command.Range.D3) {
+            List<Bars.Point> wk = Feed.week(id);
+            src = wk == null ? new ArrayList<>() : Bars.merge(wk, Feed.RECORDER.points(id));
+        } else {
+            Feed.day(id);
+            src = Feed.recent(id);
+        }
+        List<Bars.Point> pts = new ArrayList<>(Bars.window(src, now - range.span, now));
+        Market.Product p = Feed.snapshot.get(id);
+        if (p != null) pts.add(new Bars.Point(now, p.bid(), p.ask()));
+        return pts;
+    }
+
+    /** % change from the first point of the range, NaN where there is no price. */
+    private static double[] rebased(List<Bars.Point> pts) {
+        double[] out = new double[pts.size()];
+        double base = Double.NaN;
+        for (int i = 0; i < pts.size(); i++) {
+            Bars.Point pt = pts.get(i);
+            double m = pt.bid() > 0 && pt.ask() > 0 ? (pt.bid() + pt.ask()) / 2 : Double.NaN;
+            if (Double.isNaN(base) && Double.isFinite(m)) base = m;
+            out[i] = Double.isFinite(m) && base > 0 ? (m / base - 1) * 100 : Double.NaN;
+        }
+        return out;
+    }
+
+    private void drawCompare(int x, int y, int w, int h, long now, int mx, int my) {
+        gx.fill(x, y, x + w, y + h, PANEL);
+        gx.box(x, y, w, h, LINE);
+        int tx = x + 4;
+        for (Command.Range r : Command.Range.values()) {
+            int tw = gx.w(r.label) + 8;
+            boolean on = r == range;
+            gx.fill(tx, y + 3, tx + tw, y + 13, on ? AMBER : 0xFF1C1C1C);
+            gx.t(r.label, tx + 4, y + 4, on ? BLACK : GRAY);
+            hits.add(new Hit(tx, y + 3, tx + tw, y + 13, () -> range = r));
+            tx += tw + 3;
+        }
+        List<Bars.Point> a = seriesFor(item, now), b = seriesFor(cmpItem, now);
+        double[] ra = rebased(a), rb = rebased(b);
+        tx += 8;
+        gx.fill(tx, y + 7, tx + 8, y + 9, GREEN);
+        tx = gx.t(gx.fit(Feed.name(item), 120) + " " + Fmt.pct(last(ra)), tx + 11, y + 4, GRAY) + 8;
+        gx.fill(tx, y + 7, tx + 8, y + 9, AMBER);
+        gx.t(gx.fit(Feed.name(cmpItem), 120) + " " + Fmt.pct(last(rb)), tx + 11, y + 4, GRAY);
+        int px = x + 6, py = y + 20, pw = w - 64, ph = h - 34;
+        double lo = 0, hi = 0;
+        for (double v : ra) if (Double.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        for (double v : rb) if (Double.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        if (a.size() < 2 && b.size() < 2) { gx.t("Loading history...", px + 6, py + ph / 2, GRAY); return; }
+        double pad = Math.max((hi - lo) * 0.08, 0.5);
+        lo -= pad;
+        hi += pad;
+        for (int i = 0; i <= 4; i++) {
+            double v = lo + (hi - lo) * i / 4;
+            int gy = yOf(v, lo, hi, py, ph);
+            gx.dotted(px, px + pw, gy, GRID);
+            gx.t(String.format(Locale.US, "%+.1f%%", v), px + pw + 4, gy - 4, DIM);
+        }
+        int zy = yOf(0, lo, hi, py, ph);
+        gx.hline(px, px + pw, zy, AMBER_DIM);
+        long from = now - range.span;
+        plotPct(a, ra, from, lo, hi, px, py, pw, ph, GREEN);
+        plotPct(b, rb, from, lo, hi, px, py, pw, ph, AMBER);
+        if (mx >= px && mx < px + pw && my >= py && my < py + ph) {
+            for (int gy = py; gy < py + ph; gy += 2) gx.fill(mx, gy, mx + 1, gy + 1, 0xFF505050);
+            long t = from + (long) ((mx - px) * (double) range.span / pw);
+            String s = label(t, range.span) + "  " + Fmt.pct(nearest(a, ra, t)) + " vs " + Fmt.pct(nearest(b, rb, t));
+            int sw = gx.w(s) + 8, sx = Math.min(mx + 6, px + pw - sw);
+            gx.fill(sx, py + 2, sx + sw, py + 13, 0xF0000000);
+            gx.box(sx, py + 2, sw, 11, AMBER_DIM);
+            gx.t(s, sx + 4, py + 4, WHITE);
+        }
+    }
+
+    private static double last(double[] v) {
+        for (int i = v.length - 1; i >= 0; i--) if (Double.isFinite(v[i])) return v[i];
+        return Double.NaN;
+    }
+
+    private static double nearest(List<Bars.Point> pts, double[] v, long t) {
+        int best = -1;
+        for (int i = 0; i < pts.size(); i++) if (best < 0 || Math.abs(pts.get(i).time() - t) < Math.abs(pts.get(best).time() - t)) best = i;
+        return best < 0 ? Double.NaN : v[best];
+    }
+
+    private void plotPct(List<Bars.Point> pts, double[] v, long from, double lo, double hi, int px, int py, int pw, int ph, int color) {
+        int lx = Integer.MIN_VALUE, ly = 0;
+        for (int i = 0; i < pts.size(); i++) {
+            if (!Double.isFinite(v[i])) { lx = Integer.MIN_VALUE; continue; }
+            int cx = px + (int) ((pts.get(i).time() - from) * (double) pw / range.span), cy = yOf(v[i], lo, hi, py, ph);
+            if (lx != Integer.MIN_VALUE) gx.line(lx, ly, cx, cy, color);
+            lx = cx;
+            ly = cy;
+        }
+    }
+
+    // ---------- PNL ----------
+
+    private void drawPnl(int top, int bottom, int mx, int my) {
+        long now = System.currentTimeMillis();
+        Portfolio pf = Terminal.PORT;
+        List<Portfolio.Trade> tr = pf.tradeList();
+        tr.sort(Comparator.comparingLong((Portfolio.Trade t) -> t.at));
+        double d7 = 0, d30 = 0;
+        int wins = 0;
+        for (Portfolio.Trade t : tr) {
+            if (now - t.at < 7 * 86_400_000L) d7 += t.pnl;
+            if (now - t.at < 30 * 86_400_000L) d30 += t.pnl;
+            if (t.pnl > 0) wins++;
+        }
+        double today = pf.realizedOn(Portfolio.day(now));
+        int x = 6;
+        x = pair("TODAY ", signed(today), x, top + 2, changeColor(today));
+        x = pair("7D ", signed(d7), x, top + 2, changeColor(d7));
+        x = pair("30D ", signed(d30), x, top + 2, changeColor(d30));
+        x = pair("ALL ", signed(pf.realizedAll), x, top + 2, changeColor(pf.realizedAll));
+        x = pair("TRADES ", Integer.toString(tr.size()), x, top + 2, WHITE);
+        pair("WIN ", tr.isEmpty() ? "-" : String.format(Locale.US, "%.0f%%", wins * 100.0 / tr.size()), x, top + 2, WHITE);
+        if (tr.isEmpty()) {
+            rows = new ArrayList<>();
+            gx.t("No closed trades yet. Each sale of something with a tracked cost (claims, insta-sells) adds one.", 6, top + LH + 8, GRAY);
+            return;
+        }
+        // equity curve
+        int cy = top + LH + 6, ch = Math.max(50, (bottom - cy) * 2 / 5), cw = width - 70;
+        gx.fill(4, cy, width - 4, cy + ch, PANEL);
+        gx.box(4, cy, width - 8, ch, LINE);
+        gx.t("REALIZED P&L, CUMULATIVE", 9, cy + 4, AMBER);
+        long from = tr.get(0).at, span = Math.max(60_000L, now - from);
+        double cum = 0, lo = 0, hi = 0;
+        double[] cumv = new double[tr.size()];
+        for (int i = 0; i < tr.size(); i++) { cum += tr.get(i).pnl; cumv[i] = cum; lo = Math.min(lo, cum); hi = Math.max(hi, cum); }
+        double pad = Math.max((hi - lo) * 0.1, 1);
+        lo -= pad;
+        hi += pad;
+        int px = 10, py = cy + 16, pw = cw, ph = ch - 22;
+        gx.hline(px, px + pw, yOf(0, lo, hi, py, ph), AMBER_DIM);
+        gx.t(Fmt.px(hi), px + pw + 4, py, DIM);
+        gx.t(Fmt.px(lo), px + pw + 4, py + ph - 8, DIM);
+        int lx = px, ly = yOf(0, lo, hi, py, ph);
+        for (int i = 0; i < tr.size(); i++) {
+            int tx = px + (int) ((tr.get(i).at - from) * (double) pw / span), ty = yOf(cumv[i], lo, hi, py, ph);
+            gx.line(lx, ly, tx, ly, cumv[i] >= 0 ? GREEN : RED);
+            gx.line(tx, ly, tx, ty, cumv[i] >= 0 ? GREEN : RED);
+            lx = tx;
+            ly = ty;
+        }
+        gx.line(lx, ly, px + pw, ly, cum >= 0 ? GREEN : RED);
+
+        // daily (left) and by item (right)
+        int y0 = cy + ch + 6, half = width / 2;
+        gx.t("BY DAY", 6, y0, AMBER);
+        gx.t("BY ITEM", half + 6, y0, AMBER);
+        gx.tr("TRADES  WIN   P&L", width - 6, y0, DIM);
+        y0 += LH + 2;
+        int fit = Math.max(1, (bottom - y0) / LH);
+        List<String> days = new ArrayList<>(pf.daily.keySet());
+        days.sort(Comparator.reverseOrder());
+        double maxAbs = 1;
+        for (String d : days) maxAbs = Math.max(maxAbs, Math.abs(pf.daily.get(d)));
+        for (int i = 0; i < Math.min(days.size(), fit); i++) {
+            double v = pf.daily.get(days.get(i));
+            int yy = y0 + i * LH, bw = (int) ((half * 0.35) * Math.abs(v) / maxAbs), bx = 6 + gx.w("2026-11-02") + 8;
+            gx.t(days.get(i), 6, yy, GRAY);
+            gx.fill(bx, yy, bx + bw, yy + LH - 3, v >= 0 ? 0x802BE04A : 0x80FF3B3B);
+            gx.tr(signed(v), half - 8, yy, changeColor(v));
+        }
+        Map<String, double[]> by = new java.util.HashMap<>(); // trades, wins, pnl
+        for (Portfolio.Trade t : tr) {
+            double[] a = by.computeIfAbsent(t.name, k -> new double[3]);
+            a[0]++;
+            if (t.pnl > 0) a[1]++;
+            a[2] += t.pnl;
+        }
+        List<String> names = new ArrayList<>(by.keySet());
+        names.sort(Comparator.comparingDouble((String n) -> -Math.abs(by.get(n)[2])));
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < Math.min(names.size(), fit); i++) {
+            String n = names.get(i);
+            double[] a = by.get(n);
+            String id = Feed.idForName(n);
+            ids.add(id == null ? n : id);
+            int yy = y0 + i * LH;
+            boolean hv = mx >= half && my >= yy - 1 && my < yy + LH - 1;
+            if (hv) gx.fill(half, yy - 1, width, yy + LH - 1, HOVER);
+            if (id != null) hits.add(new Hit(half, yy - 1, width, yy + LH - 1, () -> open(id)));
+            gx.t(gx.fit(n, (int) (half * 0.45)), half + 6, yy, WHITE);
+            gx.tr(String.format(Locale.US, "%d  %3.0f%%  ", (int) a[0], a[1] * 100 / a[0]), width - 6 - gx.w("+999.9M"), yy, GRAY);
+            gx.tr(signed(a[2]), width - 6, yy, changeColor(a[2]));
+        }
+        rows = ids;
+    }
+
+    // ---------- ALRT ----------
+
+    private void addAlert(String args) {
+        Alerts.Parsed a = Alerts.parse(args);
+        if (a.error() != null) { status(a.error(), RED); return; }
+        List<String> m = find(a.item());
+        if (m.isEmpty()) { status("No Bazaar item matches \"" + a.item() + "\"", RED); return; }
+        Alerts.Rule r = new Alerts.Rule();
+        r.id = m.get(0);
+        r.field = a.field().name();
+        r.op = a.op();
+        r.value = a.value();
+        Terminal.CONFIG.priceAlerts.add(r);
+        Terminal.CONFIG.save();
+        status("Alert set: " + Feed.name(r.id) + " " + r.describe(), GREEN);
+    }
+
+    private void deleteAlert() {
+        List<Alerts.Rule> rs = Terminal.CONFIG.priceAlerts;
+        if (view != View.ALRT || sel >= rs.size()) return;
+        rs.remove(sel);
+        Terminal.CONFIG.save();
+        status("Alert deleted", GRAY);
+    }
+
+    private void rearm(boolean all) {
+        List<Alerts.Rule> rs = Terminal.CONFIG.priceAlerts;
+        for (int i = 0; i < rs.size(); i++) if (all || i == sel) rs.get(i).fired = false;
+        Terminal.CONFIG.save();
+        status(all ? "All alerts re-armed" : "Alert re-armed", GREEN);
+    }
+
+    private static final String[] ACOLS = {"ITEM", "CONDITION", "NOW", "STATUS"};
+    private static final double[] ACOLW = {0.34, 0.26, 0.16, 0.24};
+
+    private void drawAlerts(int top, int bottom, int mx, int my) {
+        List<Alerts.Rule> rs = new ArrayList<>(Terminal.CONFIG.priceAlerts);
+        List<String> ids = new ArrayList<>();
+        for (Alerts.Rule r : rs) ids.add(r.id);
+        rows = ids;
+        if (rs.isEmpty()) {
+            gx.t("No alerts. ALERT enchanted coal < 120 sets one; it fires once in chat with a sound.", 6, top + 4, GRAY);
+            gx.t("Fields: price (default), BID, ASK, SPR (spread %), CHG1H (1 hour % move). Operators > < >= <=.", 6, top + 4 + LH, DIM);
+            return;
+        }
+        Table t = new Table(ACOLS, ACOLW);
+        t.header(top + 2, -1, false, c -> {});
+        int y0 = top + LH + 4, fit = Math.max(1, (bottom - y0) / LH);
+        clampSel(rs.size(), fit);
+        long now = System.currentTimeMillis();
+        for (int i = scroll; i < Math.min(rs.size(), scroll + fit); i++) {
+            Alerts.Rule r = rs.get(i);
+            int y = y0 + (i - scroll) * LH, idx = i;
+            rowBackground(y, i == sel, mx, my, () -> sel = idx);
+            t.cell(0, y, Feed.name(r.id), i == sel ? AMBER : WHITE, 0);
+            t.cell(1, y, r.describe(), GRAY, 0);
+            double v = Alerts.value(r.f(), Feed.snapshot.get(r.id), Feed.change(r.id, 3_600_000L));
+            t.cell(2, y, r.f() == Alerts.Field.SPR || r.f() == Alerts.Field.CHG1H ? Fmt.pct(v) : Fmt.px(v), WHITE, 0);
+            t.cell(3, y, r.fired ? "FIRED " + Fmt.ago(now - r.firedAt) + " ago" : "ARMED", r.fired ? YELLOW : GREEN, 0);
+        }
+    }
+
+    // ---------- SECT ----------
+
+    private static final String[] SCOLS = {"SECTOR", "ITEMS", "UP", "DOWN", "1H", "24H", "FLOW/D"};
+    private static final double[] SCOLW = {0.30, 0.10, 0.10, 0.10, 0.12, 0.12, 0.16};
+
+    private void drawSectors(int top, int bottom, int mx, int my) {
+        List<Sectors.Stat> st = Sectors.stats(Feed.snapshot.products().values(), id -> Feed.change(id, 86_400_000L),
+                id -> Feed.change(id, 3_600_000L), Terminal.CONFIG.minWeekVolume);
+        gx.t("Flow-weighted moves, items trading " + Fmt.qty(Terminal.CONFIG.minWeekVolume) + "+ a week. Enter opens a sector.", 6, top + 2, DIM);
+        Table t = new Table(SCOLS, SCOLW);
+        t.header(top + LH + 4, -1, false, c -> {});
+        int y0 = top + 2 * LH + 6;
+        List<String> names = new ArrayList<>();
+        for (Sectors.Stat s : st) names.add(s.name());
+        rows = names;
+        clampSel(st.size(), st.size());
+        for (int i = 0; i < st.size(); i++) {
+            Sectors.Stat s = st.get(i);
+            int y = y0 + i * LH, idx = i;
+            rowBackground(y, i == sel, mx, my, () -> { sel = idx; openSector(idx); });
+            t.cell(0, y, s.name(), i == sel ? AMBER : WHITE, 0);
+            t.cell(1, y, Integer.toString(s.items()), GRAY, 0);
+            t.cell(2, y, Integer.toString(s.up()), GREEN, 0);
+            t.cell(3, y, Integer.toString(s.down()), RED, 0);
+            t.cell(4, y, Fmt.pct(s.chg1h()), changeColor(s.chg1h()), 0);
+            t.cell(5, y, Fmt.pct(s.chg24()), changeColor(s.chg24()), 0);
+            t.cell(6, y, Fmt.px(s.flow()), GRAY, 0);
+        }
+    }
+
+    private void openSector(int i) {
+        if (i < 0 || i >= Sectors.ALL.length) return;
+        sector = Sectors.ALL[i];
+        go(View.SECX, null);
+    }
+
+    private void drawSectorItems(int top, int bottom, int mx, int my) {
+        List<String> ids = new ArrayList<>();
+        for (Market.Product p : Feed.snapshot.products().values())
+            if (p.weekVolume() >= Terminal.CONFIG.minWeekVolume && Sectors.of(p.id()).equals(sector)) ids.add(p.id());
+        sortBy(ids, id -> { Market.Product p = Feed.snapshot.get(id); return p == null ? 0 : p.coinFlowDay(); }, true);
+        rows = ids;
+        Table t = new Table(COLS, COLW);
+        t.header(top + 2, 7, true, c -> {});
+        listRows(t, ids, top + LH + 4, bottom, mx, my);
+    }
 
     // ---------- order ticket ----------
 
@@ -1225,6 +1631,12 @@ public final class TerminalScreen extends Screen {
             return;
         }
         double price = instant ? 0 : ticketPrice(p, side);
+        double value = side == Ticket.Side.BUY ? qty * (instant ? p.ask() : price) : Guide.carrying(item) * (instant ? p.bid() : price);
+        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
+        if (used + value > Terminal.CONFIG.dailyLimit) {
+            status("Over your daily limit: " + Fmt.px(used) + " used + " + Fmt.px(value) + " > " + Fmt.px(Terminal.CONFIG.dailyLimit) + ". Lower QTY or LIMIT.", RED);
+            return;
+        }
         Ticket.Active a = new Ticket.Active(item, Feed.name(item), side, instant ? Ticket.Mode.INSTA : Ticket.Mode.ORDER, price, qty, System.currentTimeMillis());
         onClose();
         Guide.launch(a);
@@ -1284,6 +1696,29 @@ public final class TerminalScreen extends Screen {
         gx.t(buy ? "TOTAL" : "PROCEEDS", x + 5, ry, AMBER_DIM);
         String pct = buy && Terminal.purse > 0 ? String.format(Locale.US, "  %.0f%% of purse", total / Terminal.purse * 100) : "";
         gx.tr(Fmt.px(total) + pct, x + w - 5, ry, WHITE);
+        ry += LH + 1;
+        double tax = 1 - Terminal.CONFIG.taxPct / 100.0;
+        if (buy) {
+            gx.t("BREAK-EVEN", x + 5, ry, AMBER_DIM);
+            gx.tr(Fmt.px(px / tax) + " sell", x + w - 5, ry, WHITE);
+            ry += LH + 1;
+            double flip = ((p.ask() - 0.1) * tax - px) * qty;
+            gx.t("FLIP AT ASK", x + 5, ry, AMBER_DIM);
+            gx.tr(signed(flip) + " net", x + w - 5, ry, changeColor(flip));
+        } else {
+            Portfolio.Pos pos = Terminal.PORT.positions.get(Items.norm(Feed.name(item)));
+            gx.t("YOUR COST", x + 5, ry, AMBER_DIM);
+            gx.tr(pos == null ? "not tracked" : Fmt.px(pos.cost), x + w - 5, ry, pos == null ? DIM : WHITE);
+            ry += LH + 1;
+            gx.t("P&L AT PRICE", x + 5, ry, AMBER_DIM);
+            if (pos == null) gx.tr("-", x + w - 5, ry, DIM);
+            else { double pl = (px * tax - pos.cost) * Math.max(1, Guide.carrying(item)); gx.tr(signed(pl) + " net", x + w - 5, ry, changeColor(pl)); }
+        }
+        ry += LH + 1;
+        double used = Terminal.PORT.placedOn(Portfolio.day(System.currentTimeMillis()));
+        double left = Terminal.CONFIG.dailyLimit - used;
+        gx.t("LIMIT LEFT", x + 5, ry, AMBER_DIM);
+        gx.tr(Fmt.px(Math.max(0, left)), x + w - 5, ry, left < total ? RED : GRAY);
         ry += LH + 3;
         // big GO button
         int bx = x + 4, bw = w - 8;

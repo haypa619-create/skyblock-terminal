@@ -22,6 +22,10 @@ public final class Config {
     public double taxPct = 1.25;
     /** Chat + sound when an order is outbid or filled. */
     public boolean alerts = true;
+    /** Hypixel's daily Bazaar limit in coins; the ticket warns before you pass it. */
+    public double dailyLimit = 15_000_000_000.0;
+    /** Price alerts (ALERT coal < 120). */
+    public List<Alerts.Rule> priceAlerts = new ArrayList<>();
     /** Order ticket: last quantity used for buy orders. */
     public long ticketQty = 1000;
     /** Where you were, so the terminal reopens there. */
@@ -40,6 +44,7 @@ public final class Config {
         }
         if (c == null) c = new Config();
         if (c.watchlist == null) c.watchlist = new ArrayList<>();
+        if (c.priceAlerts == null) c.priceAlerts = new ArrayList<>();
         c.file = f;
         c.save();
         return c;
