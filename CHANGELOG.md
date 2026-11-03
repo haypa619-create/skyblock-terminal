@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4
+
+- Quantity chips scale with the item: 5%, 10%, 25% and 50% of what your purse can buy at the ticket price, rounded to clean numbers, so a 14M item gets 1, 2, 5, 10 and a 5-coin item gets thousands.
+- MAX is the real maximum: the most your purse covers, capped at Hypixel's 71,680 per order and by a daily limit you set yourself. The buy quantity used is never above it.
+- CUSTOM QUANTITY button under the chips opens the command line on QTY, so you can type 250, 5k or MAX.
+
 ## 0.5.3
 
 - The search dropdown now works after CMP, ALERT and POS, not only for opening, ADD and DEL. Pick a match with Tab, Enter or a click. For ALERT and POS it fills in the item name and keeps the rest of what you typed.

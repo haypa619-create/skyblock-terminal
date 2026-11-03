@@ -565,7 +565,7 @@ public final class TerminalScreen extends Screen {
         if (cmpItem != null && !cmpItem.equals(item)) drawCompare(4, y, leftW, chartH, now, mx, my);
         else drawChart(p, 4, y, leftW, chartH, now, mx, my);
         drawStats(p, 4, y + chartH + 4, leftW, now);
-        int ticketH = 13 * LH + 8;
+        int ticketH = 14 * LH + 10;
         int bookH = Math.max(6 * LH, bottom - y - ticketH - 4);
         drawBook(p, width - bookW - 4, y, bookW, bookH);
         drawTicket(p, width - bookW - 4, y + bookH + 4, bookW, bottom - (y + bookH + 4), mx, my);
@@ -1130,14 +1130,15 @@ public final class TerminalScreen extends Screen {
             case POS -> posCommand(c.item());
             case BUY, SELL -> ticketCommand(c);
             case QTY -> {
-                if (c.item().equals("MAX")) { Terminal.CONFIG.ticketQty = maxQty(); }
+                if (c.item().equals("MAX")) { Terminal.CONFIG.ticketQty = Math.max(1, maxQty()); }
                 else {
                     double v = Ticket.parseNum(c.item());
                     if (v < 1) { status("QTY 5k, QTY 64, or QTY MAX", RED); return; }
                     Terminal.CONFIG.ticketQty = clampQty((long) v);
                 }
                 Terminal.CONFIG.save();
-                status("Quantity " + Fmt.qty(Terminal.CONFIG.ticketQty), GREEN);
+                long eff = effectiveQty();
+                status("Quantity " + Fmt.qty(eff) + (eff < Terminal.CONFIG.ticketQty ? " (capped by your purse)" : ""), GREEN);
             }
             case PX -> {
                 if (c.item().equals("AUTO") || c.item().isEmpty()) { tPrice = 0; status("Price: auto", GREEN); return; }
@@ -1706,8 +1707,45 @@ public final class TerminalScreen extends Screen {
     private long maxQty() {
         Market.Product p = Feed.snapshot.get(item);
         double px = ticketPrice(p, Ticket.Side.BUY);
-        if (p == null || px <= 0 || Terminal.purse <= 0) return MAX_ORDER_UNITS;
-        return clampQty((long) Math.floor(Terminal.purse / px));
+        if (p == null || px <= 0) return MAX_ORDER_UNITS;
+        double budget = Terminal.purse > 0 ? Terminal.purse : Double.MAX_VALUE;
+        if ("manual".equals(Terminal.CONFIG.limitSource) && Terminal.CONFIG.limitCoins > 0) {
+            double left = Terminal.CONFIG.limitCoins - Terminal.PORT.usedSince(Terminal.windowStart(System.currentTimeMillis()));
+            budget = Math.min(budget, Math.max(0, left));
+        }
+        if (budget == Double.MAX_VALUE) return MAX_ORDER_UNITS;
+        return Math.max(0, Math.min(MAX_ORDER_UNITS, (long) Math.floor(budget / px)));
+    }
+
+    /** The buy quantity actually used: what you picked, never more than your purse (or a limit you set) allows. */
+    private long effectiveQty() {
+        long want = clampQty(Terminal.CONFIG.ticketQty), max = maxQty();
+        return max >= 1 ? Math.min(want, max) : want;
+    }
+
+    /** Rounds down to 1, 2 or 5 times a power of ten, so chips read cleanly. */
+    private static long nice(long n) {
+        if (n < 10) return Math.max(1, n);
+        long m = 1;
+        while (m * 10 <= n) m *= 10;
+        for (long lead : new long[]{5, 2, 1}) if (lead * m <= n) return lead * m;
+        return m;
+    }
+
+    /** Four quantity chips scaled to the price: 5%, 10%, 25% and 50% of what your purse can buy. */
+    private long[] scaledChips() {
+        long max = maxQty();
+        if (max < 1) return new long[0];
+        double[] fr = {0.05, 0.10, 0.25, 0.50};
+        java.util.LinkedHashSet<Long> out = new java.util.LinkedHashSet<>();
+        for (double f : fr) {
+            long q = nice((long) Math.max(1, Math.floor(max * f)));
+            if (q < max) out.add(q);
+        }
+        long[] r = new long[out.size()];
+        int i = 0;
+        for (long q : out) r[i++] = q;
+        return r;
     }
 
     private static double ticketPrice(Market.Product p, Ticket.Side side) {
@@ -1742,7 +1780,7 @@ public final class TerminalScreen extends Screen {
         Ticket.Side side = tSide;
         long qty = 0;
         if (side == Ticket.Side.BUY) {
-            qty = clampQty(Terminal.CONFIG.ticketQty);
+            qty = effectiveQty();
             double px = instant ? p.ask() : ticketPrice(p, side);
             if (Terminal.purse > 0 && px * qty > Terminal.purse) {
                 status("Not enough coins: " + Fmt.px(px * qty) + " needed, purse " + Fmt.px(Terminal.purse) + ". Try QTY MAX.", RED);
@@ -1790,27 +1828,38 @@ public final class TerminalScreen extends Screen {
             hits.add(new Hit(tx, ty, tx + tw, ty + 12, () -> tSide = sd));
         }
         int ry = ty + 16;
-        long qty = clampQty(Terminal.CONFIG.ticketQty);
+        long qty = effectiveQty();
         double px = ticketPrice(p, tSide);
         String pxNote = tPrice > 0 ? "custom" : buy ? "bid+0.1" : "ask-0.1";
         if (buy) {
             gx.t("QTY", x + 5, ry, AMBER_DIM);
             gx.tr(Fmt.qty(qty), x + w - 5, ry, WHITE);
             ry += LH + 1;
-            long[] chips = {64, 640, 1000, 10000, -1};
-            String[] labs = {"64", "640", "1K", "10K", "MAX"};
-            int cx = x + 4, cw = (w - 8 - 4 * 2) / 5;
+            long[] sc = scaledChips();
+            long[] chips = new long[sc.length + 1];
+            String[] labs = new String[sc.length + 1];
+            for (int i = 0; i < sc.length; i++) { chips[i] = sc[i]; labs[i] = Fmt.qty(sc[i]); }
+            chips[sc.length] = -1;
+            labs[sc.length] = "MAX";
+            int cx = x + 4, cw = (w - 8 - (chips.length - 1) * 2) / chips.length;
+            long maxQ = maxQty();
             for (int i = 0; i < chips.length; i++) {
                 final long q = chips[i];
-                boolean on = q > 0 && q == qty;
+                boolean on = q > 0 ? q == qty : qty == maxQ;
                 gx.fill(cx, ry, cx + cw, ry + 11, on ? AMBER : 0xFF1C1C1C);
                 gx.tc(labs[i], cx + cw / 2, ry + 2, on ? BLACK : GRAY);
                 hits.add(new Hit(cx, ry, cx + cw, ry + 11, () -> {
-                    Terminal.CONFIG.ticketQty = q < 0 ? maxQty() : q;
+                    Terminal.CONFIG.ticketQty = q < 0 ? Math.max(1, maxQty()) : q;
                     Terminal.CONFIG.save();
                 }));
                 cx += cw + 2;
             }
+            ry += 13;
+            boolean hc = mx >= x + 4 && mx < x + w - 4 && my >= ry && my < ry + 11;
+            gx.fill(x + 4, ry, x + w - 4, ry + 11, hc ? 0xFF2C2C2C : 0xFF1C1C1C);
+            gx.box(x + 4, ry, w - 8, 11, AMBER_DIM);
+            gx.tc("CUSTOM QUANTITY", x + w / 2, ry + 2, AMBER);
+            hits.add(new Hit(x + 4, ry, x + w - 4, ry + 11, () -> { cmd = "QTY "; status("Type a quantity like 250 or 5k, then Enter. MAX works too.", GRAY); }));
             ry += 14;
         } else {
             gx.t("CARRYING", x + 5, ry, AMBER_DIM);
