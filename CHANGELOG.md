@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.6.0
+- Fix: claiming a filled buy order now always lands in Portfolio positions. A looser claim-message match, plus a fallback: if a fully filled buy order disappears from Manage Orders, the units are credited.
+
 ## 0.5.9
 
 - The terminal always opens on the Monitor when you press B or type /sbt. Hover + B on an item and /sbt <item> still open that item. To go back to reopening where you left off, set "reopenLast": true in config/sbterminal.json.

@@ -80,6 +80,7 @@ public final class Portfolio {
     static final Pattern INSTA_BUY = Pattern.compile("^\\[Bazaar\\] Bought ([\\d,]+)x (.+?) for ([\\d,.]+) coins?!?.*$");
     static final Pattern INSTA_SELL = Pattern.compile("^\\[Bazaar\\] Sold ([\\d,]+)x (.+?) for ([\\d,.]+) coins?!?.*$");
     static final Pattern CLAIM_BUY = Pattern.compile("^\\[Bazaar\\] Claimed ([\\d,]+)x (.+?) worth ([\\d,.]+) coins? bought for ([\\d,.]+) each!.*$");
+    static final Pattern CLAIM_LOOSE = Pattern.compile("^\\[Bazaar\\] Claimed ([\\d,]+)x? (.+?) worth ([\\d,.]+) coins?.*$");
     static final Pattern CLAIM_SELL = Pattern.compile("^\\[Bazaar\\] Claimed ([\\d,.]+) coins? from selling ([\\d,]+)x (.+?) at ([\\d,.]+) each!.*$");
 
     public static Portfolio load(Path dir) {
@@ -179,6 +180,14 @@ public final class Portfolio {
             claimOrder(m.group(2), true, u);
             return true;
         }
+        if ((m = CLAIM_LOOSE.matcher(line)).matches() && !line.contains("from selling")) {
+            double u = num(m.group(1)), total = num(m.group(3));
+            if (u > 0) {
+                addUnits(m.group(2), u, total / u);
+                claimOrder(m.group(2), true, u);
+                return true;
+            }
+        }
         if ((m = CLAIM_SELL.matcher(line)).matches()) {
             sellUnits(m.group(3), num(m.group(2)), num(m.group(1)), now);
             claimOrder(m.group(3), false, num(m.group(2)));
@@ -268,6 +277,14 @@ public final class Portfolio {
             o.filled = s.claimable() && s.filled() >= s.amount();
             o.at = keep != null ? keep.at : now;
             next.add(o);
+        }
+        // A fully filled buy order that left the menu without a claim message we understood:
+        // it was claimed, so credit the units (the chat line is the exact source when it matches).
+        for (Order old : orders) {
+            if (!old.buy || !old.filled || old.units <= 0) continue;
+            boolean still = false;
+            for (Order n : next) if (n.buy && key(n.name).equals(key(old.name)) && Math.abs(n.price - old.price) < 0.05) { still = true; break; }
+            if (!still && old.units - old.claimed > 0.5) addUnits(old.name, Math.max(0, old.units - old.claimed), old.price);
         }
         orders = next;
         syncedAt = now;
