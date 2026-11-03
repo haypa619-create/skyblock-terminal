@@ -178,7 +178,8 @@ public final class TerminalScreen extends Screen {
         int y = 30;
         y = drawTitleLine(y);
         y = drawToolbar(y, mx, my);
-        int bottom = height - 25;
+        int bottom = height - 36;
+        drawTabs(height - 35, mx, my);
         drawHealth(height - 24, mx, my);
         switch (view) {
             case MON -> drawMonitor(y, bottom, mx, my);
@@ -315,6 +316,29 @@ public final class TerminalScreen extends Screen {
         return y + 16;
     }
 
+    /** Clickable tab bar: every screen, with its hotkey when it has one. */
+    private void drawTabs(int y, int mx, int my) {
+        gx.fill(0, y, width, y + 11, 0xFF101010);
+        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
+                {"SECT", null}, {"LIM", null}, {"HELP", "HELP"}};
+        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
+        int total = 0;
+        for (String[] t : tabs) total += gx.w((t[1] != null ? keyLabel(t[1]) + " " : "") + t[0]) + 14;
+        boolean keys = total <= width - 8;
+        int x = 4;
+        for (int i = 0; i < tabs.length; i++) {
+            View v = views[i];
+            boolean on = view == v || (v == View.SECT && view == View.SECX);
+            String lab = (keys && tabs[i][1] != null ? keyLabel(tabs[i][1]) + " " : "") + tabs[i][0];
+            int w = gx.w(lab) + 10;
+            boolean hover = mx >= x && mx < x + w && my >= y && my < y + 11;
+            gx.fill(x, y + 1, x + w, y + 10, on ? AMBER : hover ? 0xFF2C2C2C : 0xFF1C1C1C);
+            gx.t(lab, x + 5, y + 2, on ? BLACK : hover ? WHITE : GRAY);
+            hits.add(new Hit(x, y, x + w, y + 11, () -> go(v, null)));
+            x += w + 2;
+        }
+    }
+
     private void drawKeys() {
         int y = height - 13;
         gx.fill(0, y, width, height, BAR);
@@ -322,15 +346,9 @@ public final class TerminalScreen extends Screen {
         x = cap("GO", "Enter", GREEN, x, y, this::enter);
         x = cap("ESC", "close", AMBER, x, y, this::escape);
         x = cap("BKSP", "back", GRAY, x, y, this::goBack);
-        x = cap(keyLabel("HELP"), "HELP", YELLOW, x, y, () -> go(View.HELP, null));
-        x = cap(keyLabel("MON"), "MON", YELLOW, x, y, () -> go(View.MON, null));
-        x = cap(keyLabel("MOV"), "MOV", YELLOW, x, y, () -> go(View.MOV, null));
-        x = cap(keyLabel("SCR"), "SCR", YELLOW, x, y, () -> go(View.SCR, null));
-        x = cap(keyLabel("PORT"), "PORT", YELLOW, x, y, () -> go(View.PORT, null));
-        x = cap(keyLabel("FLIP"), "FLIP", YELLOW, x, y, () -> go(View.FLIP, null));
-        if (view == View.ITEM) { x = cap(keyLabel("BUY"), "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap(keyLabel("SELL"), "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y); }
-        else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
-        else if (view == View.SCR || view == View.FLIP) cap("←→", "sort", GRAY, x, y);
+        if (view == View.ITEM) { x = cap(keyLabel("BUY"), "BUY", GREEN, x, y, () -> tSide = Ticket.Side.BUY); x = cap(keyLabel("SELL"), "SELL", RED, x, y, () -> tSide = Ticket.Side.SELL); cap("←→", "range", GRAY, x, y, () -> horizontal(1)); }
+        else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y, () -> horizontal(1));
+        else if (view == View.SCR || view == View.FLIP) cap("←→", "sort", GRAY, x, y, () -> horizontal(1));
         else if (view == View.MON) { x = cap("Shift↑↓", "move", GRAY, x, y); cap(keyLabel("LIST"), "LIST", YELLOW, x, y, this::cycleList); }
         String bf = Feed.backfillStatus();
         if (!bf.isEmpty()) gx.tr(bf, width - 4, y + 3, DIM);

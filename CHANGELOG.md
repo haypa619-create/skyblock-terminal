@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.3
+- Clickable tab bar above the bottom strip with every screen (MON MOV SCR FLIP PORT PNL ALRT SECT LIM HELP), current one highlighted, hotkeys shown. The footer was too long on big GUI scales and could push buttons off screen, so it now only holds Enter / Esc / Back and the hints for the current screen (the arrow hint is clickable too).
+
 ## 0.7.2
 - BIND: set your own hotkeys. BIND FLIP then press a key, or BIND FLIP F6 / CTRL+G. BIND alone lists them, BIND RESET restores defaults. Footer keys show your bindings. Actions: HELP MON MOV SCR BUY SELL PORT FLIP LIST.
 
