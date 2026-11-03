@@ -818,8 +818,8 @@ public final class TerminalScreen extends Screen {
         status("Ticket set: buy " + Fmt.qty(Terminal.CONFIG.ticketQty) + " at " + Fmt.px(sg.buy()) + ", then sell at " + Fmt.px(sg.sell()) + ". Enter places it.", GREEN);
     }
 
-    private static final String[] QCOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z", "ML 4H"};
-    private static final double[] QCOLW = {0.22, 0.10, 0.10, 0.10, 0.08, 0.08, 0.07, 0.11, 0.05, 0.09};
+    private static final String[] QCOLS = {"ITEM", "FAIR", "BUY AT", "SELL AT", "NET/U", "SIZE", "CYCLE", "EDGE/H", "Z", "ML 4H", "3D"};
+    private static final double[] QCOLW = {0.20, 0.09, 0.09, 0.09, 0.08, 0.08, 0.07, 0.10, 0.05, 0.08, 0.07};
 
     private void drawAlgo(int top, int bottom, int mx, int my) {
         long now = System.currentTimeMillis();
@@ -858,6 +858,8 @@ public final class TerminalScreen extends Screen {
             t.cell(7, y, Fmt.px(s.edgeH()), AMBER, 0);
             t.cell(8, y, String.format(Locale.US, "%+.1f", s.z()), s.z() < -1 ? GREEN : s.z() > 1 ? RED : GRAY, 0);
             t.cell(9, y, Double.isNaN(s.pred()) ? "-" : String.format(Locale.US, "%+.2f%%", s.pred()), Double.isNaN(s.pred()) || !Learner.MODEL.trusted() ? DIM : changeColor(s.pred()), 0);
+            double d3 = DeepTrainer.predict(id);
+            t.cell(10, y, Double.isNaN(d3) ? "-" : String.format(Locale.US, "%+.1f%%", d3), Double.isNaN(d3) ? DIM : changeColor(d3), 0);
         }
         if (!res.isEmpty() && sel < res.size()) {
             Quant.Signal s = res.get(sel);
@@ -1061,6 +1063,7 @@ public final class TerminalScreen extends Screen {
         x = pair("WARM START ", Learner.warmDone + "/" + Learner.warmTotal + " items (" + Fmt.qty(Learner.warmTrained) + " samples)", x, y, GRAY);
         x = pair("LIVE ", Fmt.qty(Learner.liveTrained) + " learned, " + Learner.pending() + " waiting for their 4h result", x, y, GRAY);
         y += LH + 6;
+        y = drawDeep(y, width);
         gx.t("WHAT IT LEARNED (share of the weight, + pushes the 4h forecast up)", 6, y, AMBER);
         y += LH + 2;
         double[] imp = m.importance();
@@ -1082,6 +1085,28 @@ public final class TerminalScreen extends Screen {
                 "ALGO only uses it once it has 1000+ samples, positive skill and over 52% direction. Until then the ML column stays grey and changes nothing.",
                 "It saves to config/sbterminal-model.json and keeps learning every session. Real markets are noisy: expect small skill, and treat it as one input."};
         for (int i = 0; i < notes.length; i++) gx.t(gx.fit(notes[i], width - 12), 6, ny + i * LH, i == 2 ? YELLOW : DIM);
+    }
+
+    /** Panel for the deep model: status, per-year walk-forward results and verdict. */
+    private int drawDeep(int y, int w) {
+        Deep.Report r = DeepTrainer.report;
+        gx.t("DEEP MODEL (3-day, years of daily history; TRAIN retrains)", 6, y, AMBER);
+        y += LH + 2;
+        gx.t(gx.fit(DeepTrainer.running() ? DeepTrainer.phase + (DeepTrainer.total > 0 ? " (" + DeepTrainer.done + "/" + DeepTrainer.total + " items)" : "") : r == null ? "Not trained yet. Type TRAIN." : r.verdict(), w - 12), 6, y, r != null && r.edge() ? GREEN : YELLOW);
+        y += LH;
+        if (r != null && !r.folds().isEmpty()) {
+            gx.t(Fmt.qty(r.totalSamples()) + " samples, " + r.items() + " items. Each row: trained on earlier years, tested on that unseen year, after 1.25% tax.", 6, y, GRAY);
+            y += LH;
+            for (Deep.Fold f : r.folds()) {
+                gx.t(String.format(Locale.US, "%d  skill %+.3f  direction %.0f%%  trades %d  avg %+.2f%%  win %.0f%%  top 10%% %+.2f%%", f.year(), f.skill(), f.dirAcc() * 100, f.trades(), f.avgNet(), f.winRate() * 100, f.topDecileNet()), 6, y, f.avgNet() > 0 && f.trades() >= 30 ? GREEN : GRAY);
+                y += LH;
+            }
+            int top = 0;
+            for (int i = 1; i < Deep.F; i++) if (r.importance()[i] > r.importance()[top]) top = i;
+            gx.t("Leans most on: " + Deep.NAMES[top] + " (" + Math.round(r.importance()[top] * 100) + "%)", 6, y, GRAY);
+            y += LH;
+        }
+        return y + 4;
     }
 
     // ---------- order health strip ----------
@@ -1853,6 +1878,10 @@ public final class TerminalScreen extends Screen {
             case ALGO -> go(View.ALGO, null);
             case NEWS -> go(View.NEWS, null);
             case ML -> go(View.ML, null);
+            case TRAIN -> {
+                go(View.ML, null);
+                status(DeepTrainer.start() ? "Deep training started: downloading years of history, then testing it on unseen years" : "Deep training is already running", GRAY);
+            }
             case BT -> backtestCommand(c.item());
             case LIST -> listCommand(c.item());
             case NOTIFY -> notifyCommand(c.item());

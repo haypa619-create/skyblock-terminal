@@ -60,6 +60,7 @@ public final class Terminal implements ClientModInitializer {
         PORT = Portfolio.load(FabricLoader.getInstance().getConfigDir());
         Feed.start();
         Learner.init(FabricLoader.getInstance().getConfigDir());
+        DeepTrainer.init(FabricLoader.getInstance().getConfigDir());
         Guide.init();
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
             if (overlay) return;

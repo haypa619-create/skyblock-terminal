@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0
+- Deep model: downloads years of daily history for the 150 busiest items and trains a gradient-boosted model for the 3-day move.
+- Walk-forward test: trains on earlier years, tests on the next unseen year, profit counted after the 1.25% tax. The verdict says EDGE only if it holds across years; otherwise NO EDGE and it is not used.
+- New TRAIN command (also retrains by itself once a day). ML screen shows status, per-year results and what it leans on.
+- ALGO has a 3D column (3-day forecast), shown only when the verdict is EDGE.
+
 ## 0.10.0
 - NEWS: SkyBlock time, the current mayor and perks (with the sectors they lean on and those sectors' 24h moves), the running election with vote shares, a countdown to the recurring events (Spooky, Jerry, Zoo, New Year, Dark Auction, Jacob's) and Hypixel news (click to copy the link).
 - ML: an online learning model that predicts the 4-hour move from cheapness vs fair value, volatility, spread, recent moves, hour of day, event closeness and whether the mayor leans on the item's sector. It warm-starts from a week of history, then learns from every live 4-hour outcome, saved to config/sbterminal-model.json. Each sample is tested before it is learned from, so the skill shown is out of sample.
