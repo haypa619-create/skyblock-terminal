@@ -48,6 +48,8 @@ public final class Config {
     /** Flip finder: share of the market's hourly volume you could realistically capture, and whether risky rows show. */
     public double flipShare = 0.05;
     public boolean flipRisky = false;
+    /** Flip finder: one inventory (36 slots x 64) is the most you can hold, and items cheaper than flipMinPrice are skipped. */
+    public double flipInvUnits = 2304, flipMinPrice = 1000;
     /** Chart: Bollinger bands (20 points, 2 sigma). */
     public boolean bollinger = false;
     /** Where you were, so the terminal reopens there. */

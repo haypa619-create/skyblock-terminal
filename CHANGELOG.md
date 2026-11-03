@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.1
+- Flip finder respects one inventory: units per hour in EST/H are capped at 36 slots x 64 (FLIP SLOTS n changes it), and items under 1k are skipped (FLIP MIN 5k changes it, or the Min price button).
+
 ## 0.7.0
 - FLIP (F8): flip finder. Ranks items by estimated profit per hour (buy at bid+0.1, sell at ask-0.1, minus tax, times a share of the hourly volume). Risky rows (huge ROI or thin books) are hidden unless you show them.
 - Order health strip on every screen: orders, outbid, to claim, daily limit %, and how fresh the order sync is. Click it to open PORT.

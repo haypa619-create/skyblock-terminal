@@ -426,6 +426,7 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Best per unit", () -> setFlipSort(Flips.Sort.NET)));
                 a.add(new Action("Best ROI", () -> setFlipSort(Flips.Sort.ROI)));
                 a.add(new Action(Terminal.CONFIG.flipRisky ? "Hide risky" : "Show risky", () -> { Terminal.CONFIG.flipRisky = !Terminal.CONFIG.flipRisky; Terminal.CONFIG.save(); sel = 0; scroll = 0; }));
+                a.add(new Action("Min price", () -> { cmd = "FLIP MIN "; status("Cheapest item to show, e.g. 5k (now " + Fmt.px(Terminal.CONFIG.flipMinPrice) + ")", GRAY); }));
                 a.add(new Action("Share " + Math.round(Terminal.CONFIG.flipShare * 100) + "%", this::cycleShare));
             }
             case SECT -> a.add(new Action("Open sector", () -> openSector(sel)));
@@ -696,6 +697,18 @@ public final class TerminalScreen extends Screen {
         scroll = 0;
     }
 
+    private void flipCommand(String arg) {
+        String[] w = arg == null || arg.isBlank() ? new String[0] : arg.trim().split("\\s+");
+        if (w.length >= 2 && (w[0].equals("MIN") || w[0].equals("SLOTS"))) {
+            double v = Ticket.parseNum(w[1]);
+            if (v < 0) { status("FLIP MIN 5k  or  FLIP SLOTS 36", RED); return; }
+            if (w[0].equals("MIN")) { Terminal.CONFIG.flipMinPrice = v; status("Flip finder skips items under " + Fmt.px(v), GREEN); }
+            else { Terminal.CONFIG.flipInvUnits = Math.max(1, v) * 64; status("Flip finder assumes " + Fmt.qty(Terminal.CONFIG.flipInvUnits) + " units per inventory (" + (long) v + " slots x 64)", GREEN); }
+            Terminal.CONFIG.save();
+        }
+        go(View.FLIP, null);
+    }
+
     private void cycleShare() {
         double[] opts = {0.02, 0.05, 0.10, 0.20};
         int i = 0;
@@ -707,10 +720,10 @@ public final class TerminalScreen extends Screen {
     private void drawFlips(int top, int bottom, int mx, int my) {
         double tax = 1 - Terminal.CONFIG.taxPct / 100.0;
         List<Flips.Row> res = Flips.run(Feed.snapshot.products().values(), tax, Terminal.CONFIG.flipShare, Terminal.CONFIG.minWeekVolume,
-                Terminal.CONFIG.flipRisky, flipSort, flipDesc);
+                Terminal.CONFIG.flipRisky, flipSort, flipDesc, Terminal.CONFIG.flipInvUnits, Terminal.CONFIG.flipMinPrice);
         int x = gx.t(res.size() + " FLIPS", 6, top + 2, AMBER) + 10;
-        gx.t(gx.fit("buy at bid+0.1, sell at ask-0.1, tax " + Terminal.CONFIG.taxPct + "%, EST/H assumes you capture "
-                + Math.round(Terminal.CONFIG.flipShare * 100) + "% of the hourly volume. "
+        gx.t(gx.fit("min price " + Fmt.px(Terminal.CONFIG.flipMinPrice) + ", max " + Fmt.qty(Terminal.CONFIG.flipInvUnits) + " units/h (one inventory), "
+                + Math.round(Terminal.CONFIG.flipShare * 100) + "% of volume. "
                 + (Terminal.CONFIG.flipRisky ? "Risky rows shown (!)." : "Risky rows hidden (huge ROI or thin books)."), width - x - 10), x, top + 2, GRAY);
         Table t = new Table(FCOLS, FCOLW);
         int col = switch (flipSort) { case PRICE -> 1; case NET -> 3; case ROI -> 4; case VOLH -> 5; case EST -> 6; };
@@ -1403,7 +1416,7 @@ public final class TerminalScreen extends Screen {
                 else { pick = m; go(View.PICK, null); }
             }
             case PORT -> go(View.PORT, null);
-            case FLIP -> go(View.FLIP, null);
+            case FLIP -> flipCommand(c.item());
             case LIST -> listCommand(c.item());
             case NOTIFY -> notifyCommand(c.item());
             case BB -> {

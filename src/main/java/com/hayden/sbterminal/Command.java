@@ -28,7 +28,7 @@ public final class Command {
             {"ALERT", "ALERT coal < 120 (or BID/ASK/SPR/CHG1H)"}, {"ALRT", "Your alerts"}, {"SECT", "Sectors: index moves by Bazaar category"},
             {"CMP", "CMP <item>: compare on the chart (CMP alone clears)"}, {"LIMIT", "Daily limit ledger, LIMIT 15B, LIMIT RESET 7:00 PM"}, {"POS", "POS item units cost: set a position by hand"},
             {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"},
-            {"FLIP", "Flip finder: best Bazaar flips by profit per hour"},
+            {"FLIP", "Flip finder. FLIP MIN 5k = cheapest item, FLIP SLOTS 36 = inventory size"},
             {"LIST", "LIST mining: switch or create a Monitor list (LIST alone cycles)"},
             {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"BB", "Bollinger bands on the chart on/off"}};
     public enum Range {
@@ -69,7 +69,7 @@ public final class Command {
                 return new Parsed(fn, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null);
             }
             case "KEYS" -> { return simple(Fn.KEYS); }
-            case "FLIP", "FLIPS" -> { return simple(Fn.FLIP); }
+            case "FLIP", "FLIPS" -> { return new Parsed(Fn.FLIP, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }
             case "BB", "BOLL" -> { return simple(Fn.BB); }
             case "LIST", "LISTS" -> { return new Parsed(Fn.LIST, s.substring(w[0].length()).trim(), null, null, List.of(), null); }
             case "NOTIFY", "NOTIF" -> { return new Parsed(Fn.NOTIFY, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null); }

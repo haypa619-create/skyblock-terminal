@@ -23,13 +23,16 @@ public final class Flips {
 
     private Flips() {}
 
-    public static Row row(Market.Product p, double taxFactor, double share) {
+    public static Row row(Market.Product p, double taxFactor, double share) { return row(p, taxFactor, share, Double.MAX_VALUE); }
+
+    /** @param capUnitsH most units per hour you can move: one inventory (36 slots x 64) per hour */
+    public static Row row(Market.Product p, double taxFactor, double share, double capUnitsH) {
         double buy = p.bid() + 0.1, sell = p.ask() - 0.1;
         double net = sell * taxFactor - buy;
         double roi = buy > 0 ? net / buy * 100 : 0;
         double volH = p.weekVolume() / 168.0;
         boolean risky = roi > 100 || p.bidOrders() < 5 || p.askOrders() < 5;
-        return new Row(p, buy, sell, net, roi, volH, Math.max(0, net) * volH * share, risky);
+        return new Row(p, buy, sell, net, roi, volH, Math.max(0, net) * Math.min(volH * share, capUnitsH), risky);
     }
 
     /** ROI % of the flip right now (for MARGIN alerts). NaN if the item has no book. */
@@ -46,11 +49,16 @@ public final class Flips {
 
     public static List<Row> run(Collection<Market.Product> products, double taxFactor, double share,
                                 double minWeekVolume, boolean showRisky, Sort sort, boolean desc) {
+        return run(products, taxFactor, share, minWeekVolume, showRisky, sort, desc, Double.MAX_VALUE, 0);
+    }
+
+    public static List<Row> run(Collection<Market.Product> products, double taxFactor, double share,
+                                double minWeekVolume, boolean showRisky, Sort sort, boolean desc, double capUnitsH, double minPrice) {
         List<Row> out = new ArrayList<>();
         for (Market.Product p : products) {
             if (p.bid() <= 0 || p.ask() <= 0 || p.weekVolume() < minWeekVolume) continue;
-            Row r = row(p, taxFactor, share);
-            if (r.net() <= 0) continue;
+            Row r = row(p, taxFactor, share, capUnitsH);
+            if (r.net() <= 0 || r.buy() < minPrice) continue;
             if (r.risky() && !showRisky) continue;
             out.add(r);
         }
