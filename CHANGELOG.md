@@ -1,7 +1,9 @@
 # Changelog
 
+## 0.12.1
+- Removed all crafting features (CRAFT tab, recipes, NPC scan). Nothing downloads recipes any more.
+
 ## 0.12.0 (alpha lab)
-- CRAFT: craft arbitrage (recipes from the NEU repo, downloaded once a week) and NPC arbitrage (items an NPC pays more for than the Bazaar asks). Profit by buy orders and by insta-buy, capped by real volume.
 - SEAS: SkyBlock-year clock. Builds a 2-hour price archive about two years back for the 60 busiest items (saved to disk, one request every 2 s) and finds slots of the ~5-day mayor/event cycle where an item reliably rises or falls. Strict test (t >= 3.3, 20+ years, same sign in old and new history).
 - New calendar event: new mayor takes office (Late Spring 27).
 - Deep model v2: volume and order-flow inputs, tests 1, 3 and 7 day horizons and two trade rules, picks the best on validation years, then scores it on a locked holdout year. EDGE needs both.

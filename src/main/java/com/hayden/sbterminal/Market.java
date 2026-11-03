@@ -109,20 +109,6 @@ public final class Market {
         return out;
     }
 
-    /** id -> coins an NPC pays for one, from the items resource (only items that have a price). */
-    public static Map<String, Double> parseNpc(String json) {
-        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-        Map<String, Double> out = new HashMap<>();
-        JsonArray items = root.getAsJsonArray("items");
-        if (items == null) return out;
-        for (JsonElement el : items) {
-            JsonObject o = el.getAsJsonObject();
-            double v = num(o, "npc_sell_price");
-            if (o.has("id") && v > 0) out.put(o.get("id").getAsString(), v);
-        }
-        return out;
-    }
-
     static double num(JsonObject o, String k) {
         return o != null && o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsDouble() : 0;
     }

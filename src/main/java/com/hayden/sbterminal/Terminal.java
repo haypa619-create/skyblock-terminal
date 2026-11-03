@@ -61,7 +61,6 @@ public final class Terminal implements ClientModInitializer {
         Feed.start();
         Learner.init(FabricLoader.getInstance().getConfigDir());
         DeepTrainer.init(FabricLoader.getInstance().getConfigDir());
-        RecipeStore.init(FabricLoader.getInstance().getConfigDir());
         Archive.init(FabricLoader.getInstance().getConfigDir());
         Guide.init();
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {

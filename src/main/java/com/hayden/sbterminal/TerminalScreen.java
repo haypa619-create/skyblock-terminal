@@ -41,7 +41,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, FLIP, ALGO, BT, NEWS, ML, CRAFT, SEAS, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
+    enum View { MON, MOV, SCR, FLIP, ALGO, BT, NEWS, ML, SEAS, ITEM, PORT, LIM, PNL, ALRT, SECT, SECX, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -190,7 +190,6 @@ public final class TerminalScreen extends Screen {
             case BT -> drawBacktest(y, bottom, mx, my);
             case NEWS -> drawNews(y, bottom, mx, my);
             case ML -> drawMl(y, bottom, mx, my);
-            case CRAFT -> drawCraft(y, bottom, mx, my);
             case SEAS -> drawSeas(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
             case PORT -> drawPortfolio(y, bottom, mx, my);
@@ -237,7 +236,6 @@ public final class TerminalScreen extends Screen {
             case BT -> "BT";
             case NEWS -> "NEWS";
             case ML -> "ML";
-            case CRAFT -> "CRAFT";
             case SEAS -> "SEAS";
             case ITEM -> "DES";
             case PORT -> "PORT";
@@ -260,7 +258,6 @@ public final class TerminalScreen extends Screen {
             case BT -> "Backtest";
             case NEWS -> "News and calendar";
             case ML -> "Learning model";
-            case CRAFT -> "Craft and NPC arbitrage";
             case SEAS -> "SkyBlock-year clock";
             case ITEM -> Feed.name(item) + "  Bazaar";
             case PORT -> "Portfolio";
@@ -337,9 +334,9 @@ public final class TerminalScreen extends Screen {
     /** Clickable tab bar: every screen, with its hotkey when it has one. */
     private void drawTabs(int y, int mx, int my) {
         gx.fill(0, y, width, y + 11, 0xFF101010);
-        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"ALGO", "ALGO"}, {"CRAFT", "CRAFT"}, {"SEAS", "SEAS"}, {"NEWS", "NEWS"}, {"ML", "ML"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
+        String[][] tabs = {{"MON", "MON"}, {"MOV", "MOV"}, {"SCR", "SCR"}, {"FLIP", "FLIP"}, {"ALGO", "ALGO"}, {"SEAS", "SEAS"}, {"NEWS", "NEWS"}, {"ML", "ML"}, {"PORT", "PORT"}, {"PNL", null}, {"ALRT", null},
                 {"SECT", null}, {"LIM", null}, {"HELP", "HELP"}};
-        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.ALGO, View.CRAFT, View.SEAS, View.NEWS, View.ML, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
+        View[] views = {View.MON, View.MOV, View.SCR, View.FLIP, View.ALGO, View.SEAS, View.NEWS, View.ML, View.PORT, View.PNL, View.ALRT, View.SECT, View.LIM, View.HELP};
         int total = 0;
         for (String[] t : tabs) total += gx.w((t[1] != null && Keys.of(Terminal.CONFIG.keys, t[1]) >= 0 ? keyLabel(t[1]) + " " : "") + t[0]) + 14;
         boolean keys = total <= width - 8;
@@ -1122,52 +1119,6 @@ public final class TerminalScreen extends Screen {
         return y + 4;
     }
 
-    // ---------- CRAFT: craft and NPC arbitrage ----------
-
-    private static final String[] CCOLS = {"TYPE", "ITEM", "INPUTS", "COST", "SELL", "PROFIT", "FAST", "ROI", "/H", "PROFIT/H"};
-    private static final double[] CCOLW = {0.05, 0.17, 0.25, 0.08, 0.08, 0.08, 0.08, 0.06, 0.06, 0.09};
-    private static List<Craft.Row> craftCache = List.of();
-    private static long craftAt = 0;
-
-    private void drawCraft(int top, int bottom, int mx, int my) {
-        long now = System.currentTimeMillis();
-        if (now - craftAt > 5000) {
-            craftAt = now;
-            craftCache = Craft.scan(RecipeStore.recipes, Feed.snapshot.products(), Feed.npc, Terminal.CONFIG.taxPct, Terminal.CONFIG.flipShare, 0);
-        }
-        List<Craft.Row> res = craftCache;
-        int x = gx.t(res.size() + " ARBS", 6, top + 2, AMBER) + 10;
-        String rs = RecipeStore.running ? "Downloading recipes " + RecipeStore.done + "/" + RecipeStore.total + ". " : RecipeStore.recipes.size() + " recipes. ";
-        gx.t(gx.fit(rs + "COST = inputs by buy order, FAST = profit if you insta-buy inputs, SELL = sell offer after tax (NPC: no tax). /H = crafts or units per hour at "
-                + Math.round(Terminal.CONFIG.flipShare * 100) + "% of volume. Needs the recipe unlocked.", width - x - 10), x, top + 2, GRAY);
-        Table t = new Table(CCOLS, CCOLW);
-        t.header(top + LH + 4, -1, false, c -> {});
-        List<String> ids = new ArrayList<>();
-        for (Craft.Row r : res) ids.add(r.id());
-        rows = ids;
-        int y0 = top + 2 * LH + 6;
-        int fit = Math.max(1, (bottom - y0) / LH);
-        clampSel(ids.size(), fit);
-        if (ids.isEmpty()) gx.t(Feed.snapshot.products().isEmpty() ? "Waiting for Bazaar data..." : RecipeStore.recipes.isEmpty() ? "Waiting for recipes..." : "No profitable crafts or NPC sales right now.", 6, y0 + 2, GRAY);
-        for (int i = scroll; i < Math.min(res.size(), scroll + fit); i++) {
-            Craft.Row r = res.get(i);
-            String id = ids.get(i);
-            int y = y0 + (i - scroll) * LH, idx = i;
-            rowBackground(y, i == sel, mx, my, () -> { sel = idx; open(id); });
-            t.cell(0, y, r.kind(), r.kind().equals("NPC") ? BLUE : AMBER_DIM, 0);
-            t.cell(1, y, Feed.name(id), i == sel ? AMBER : WHITE, 0);
-            t.cell(2, y, r.inputs(), GRAY, 0);
-            t.cell(3, y, Fmt.px(r.cost()), GREEN, 0);
-            t.cell(4, y, Fmt.px(r.sell()), BLUE, 0);
-            t.cell(5, y, Fmt.px(r.profit()), changeColor(r.profit()), 0);
-            t.cell(6, y, Fmt.px(r.fastProfit()), changeColor(r.fastProfit()), 0);
-            t.cell(7, y, String.format(Locale.US, "%.1f%%", r.roi()), WHITE, 0);
-            t.cell(8, y, String.format(Locale.US, "%.1f", r.perH()), GRAY, 0);
-            t.cell(9, y, Fmt.px(r.profitH()), AMBER, 0);
-        }
-        if (ids.size() > fit) gx.tr((scroll + 1) + "-" + Math.min(ids.size(), scroll + fit) + " of " + ids.size(), width - 6, bottom - LH + 1, DIM);
-    }
-
     // ---------- SEAS: SkyBlock-year clock ----------
 
     private static final String[] YCOLS = {"STARTS IN", "ITEM", "WHEN (SkyBlock date)", "AVG MOVE", "UP", "YEARS", "STRENGTH", "TRADE"};
@@ -1803,7 +1754,6 @@ public final class TerminalScreen extends Screen {
             case "ALGO" -> go(View.ALGO, null);
             case "NEWS" -> go(View.NEWS, null);
             case "ML" -> go(View.ML, null);
-            case "CRAFT" -> go(View.CRAFT, null);
             case "SEAS" -> go(View.SEAS, null);
             case "LIST" -> cycleList();
             case "BUY" -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; }
@@ -1981,7 +1931,6 @@ public final class TerminalScreen extends Screen {
             case ALGO -> go(View.ALGO, null);
             case NEWS -> go(View.NEWS, null);
             case ML -> go(View.ML, null);
-            case CRAFT -> go(View.CRAFT, null);
             case SEAS -> go(View.SEAS, null);
             case TRAIN -> {
                 go(View.ML, null);

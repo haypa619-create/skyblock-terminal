@@ -19,8 +19,6 @@ import java.util.concurrent.TimeUnit;
 public final class Feed {
     public static volatile Market.Snapshot snapshot = Market.Snapshot.EMPTY;
     public static volatile Map<String, String> names = Map.of();
-    /** id -> NPC sell price. */
-    public static volatile Map<String, Double> npc = Map.of();
     public static volatile String error = null;
     public static volatile boolean terminalOpen = false;
     public static final Recorder RECORDER = new Recorder();
@@ -57,7 +55,7 @@ public final class Feed {
 
     public static void start() {
         HISTORY.execute(() -> {
-            try { String j = Http.get(Market.ITEMS_URL); names = Market.parseNames(j); npc = Market.parseNpc(j); } catch (Exception e) { Terminal.LOG.warn("Item names: {}", e.toString()); }
+            try { String j = Http.get(Market.ITEMS_URL); names = Market.parseNames(j); } catch (Exception e) { Terminal.LOG.warn("Item names: {}", e.toString()); }
         });
         LIVE.scheduleWithFixedDelay(Feed::tick, 0, 1, TimeUnit.SECONDS);
         HISTORY.scheduleWithFixedDelay(Feed::backfillStep, 20, 3, TimeUnit.SECONDS);
