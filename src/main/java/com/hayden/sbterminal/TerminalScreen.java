@@ -63,6 +63,9 @@ public final class TerminalScreen extends Screen {
     private static int sel = 0, scroll = 0;
     private static List<String> pick = List.of();
     private static boolean restored = false;
+    // order ticket (survives closing)
+    private static Ticket.Side tSide = Ticket.Side.BUY;
+    private static double tPrice = 0; // 0 = auto (join the best bid or ask)
 
     // ---- per-screen ----
     private String cmd = "";
@@ -273,7 +276,7 @@ public final class TerminalScreen extends Screen {
         x = cap("F2", "MON", YELLOW, x, y);
         x = cap("F3", "MOV", YELLOW, x, y);
         x = cap("F4", "SCR", YELLOW, x, y);
-        if (view == View.ITEM) cap("←→", "range", GRAY, x, y);
+        if (view == View.ITEM) { x = cap("F5", "BUY", GREEN, x, y); x = cap("F6", "SELL", RED, x, y); cap("←→", "range", GRAY, x, y); }
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
         else if (view == View.SCR) cap("←→", "sort", GRAY, x, y);
         else if (view == View.MON) cap("Shift↑↓", "move", GRAY, x, y);
@@ -296,10 +299,12 @@ public final class TerminalScreen extends Screen {
             case ITEM -> {
                 if (item == null) break;
                 boolean on = Terminal.CONFIG.watchlist.contains(item);
+                a.add(new Action("BUY order", () -> { tSide = Ticket.Side.BUY; placeTicket(false); }));
+                a.add(new Action("SELL offer", () -> { tSide = Ticket.Side.SELL; placeTicket(false); }));
+                a.add(new Action("Buy now", () -> { tSide = Ticket.Side.BUY; placeTicket(true); }));
+                a.add(new Action("Sell now", () -> { tSide = Ticket.Side.SELL; placeTicket(true); }));
                 a.add(new Action(on ? "Remove from MON" : "Add to MON", () -> toggleWatch(item)));
-                a.add(new Action("Copy bid+0.1", () -> copyPrice(true)));
-                a.add(new Action("Copy ask-0.1", () -> copyPrice(false)));
-                a.add(new Action("Open in Bazaar", this::openBazaar));
+                a.add(new Action("Copy price", () -> copyPrice(tSide == Ticket.Side.BUY)));
                 for (Command.Range r : Command.Range.values()) a.add(new Action(r.label, () -> range = r));
             }
             case MON -> {
@@ -498,7 +503,10 @@ public final class TerminalScreen extends Screen {
         int chartH = Math.max(60, bottom - y - statsH - 4);
         drawChart(p, 4, y, leftW, chartH, now, mx, my);
         drawStats(p, 4, y + chartH + 4, leftW, now);
-        drawBook(p, width - bookW - 4, y, bookW, bottom - y);
+        int ticketH = 10 * LH + 8;
+        int bookH = Math.max(6 * LH, bottom - y - ticketH - 4);
+        drawBook(p, width - bookW - 4, y, bookW, bookH);
+        drawTicket(p, width - bookW - 4, y + bookH + 4, bookW, bottom - (y + bookH + 4), mx, my);
     }
 
     private void drawChart(Market.Product p, int x, int y, int w, int h, long now, int mx, int my) {
@@ -672,6 +680,9 @@ public final class TerminalScreen extends Screen {
                 {"MON", "Monitor (your watchlist)     ADD radar / DEL radar"},
                 {"MOV", "movers, 24h or 1h"},
                 {"SCR VOL>50K SPR>3", "screener. VOL FLOW PX SPR CHG CHG1H ORD, with > < >= <=, K/M/B"},
+                {"BUY 5k 120.5", "on an item page: open that buy order in the Bazaar, numbers filled in"},
+                {"SELL 130.5 / BUY 5k NOW", "list what you carry / buy or sell instantly"},
+                {"QTY 5k / PX 123.4", "ticket quantity and price (PX AUTO = join the best bid or ask)"},
                 {"FONT MONO / FONT MC", "terminal font or Minecraft font"},
                 {"2 <GO>", "run toolbar action 2 (or click it)"},
                 {"", ""},
@@ -895,6 +906,8 @@ public final class TerminalScreen extends Screen {
             case 291 -> { go(View.MON, null); return true; }
             case 292 -> { go(View.MOV, null); return true; }
             case 293 -> { go(View.SCR, null); return true; }
+            case 294 -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; return true; }
+            case 295 -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; return true; }
             default -> { return super.keyPressed(e); }
         }
     }
@@ -922,7 +935,8 @@ public final class TerminalScreen extends Screen {
             suggest = List.of();
             return;
         }
-        if (view != View.ITEM && sel < rows.size()) open(rows.get(sel));
+        if (view == View.ITEM) placeTicket(false);
+        else if (sel < rows.size()) open(rows.get(sel));
     }
 
     @Override
@@ -995,8 +1009,159 @@ public final class TerminalScreen extends Screen {
                 if (m.size() == 1 || exact(c.item(), m.get(0))) open(m.get(0));
                 else { pick = m; go(View.PICK, null); }
             }
+            case BUY, SELL -> ticketCommand(c);
+            case QTY -> {
+                if (c.item().equals("MAX")) { Terminal.CONFIG.ticketQty = maxQty(); }
+                else {
+                    double v = Ticket.parseNum(c.item());
+                    if (v < 1) { status("QTY 5k, QTY 64, or QTY MAX", RED); return; }
+                    Terminal.CONFIG.ticketQty = clampQty((long) v);
+                }
+                Terminal.CONFIG.save();
+                status("Quantity " + Fmt.qty(Terminal.CONFIG.ticketQty), GREEN);
+            }
+            case PX -> {
+                if (c.item().equals("AUTO") || c.item().isEmpty()) { tPrice = 0; status("Price: auto", GREEN); return; }
+                double v = Ticket.parseNum(c.item());
+                if (v <= 0) { status("PX 123.4 or PX AUTO", RED); return; }
+                tPrice = Ticket.round1(v);
+                status("Price " + Fmt.px(tPrice) + " (custom)", GREEN);
+            }
             case EMPTY -> {}
         }
+    }
+
+    // ---------- order ticket ----------
+
+    private static final long MAX_ORDER_UNITS = 71_680;
+
+    private static long clampQty(long q) { return Math.max(1, Math.min(MAX_ORDER_UNITS, q)); }
+
+    /** The most you can buy at the ticket price with your purse (capped at Hypixel's order limit). */
+    private long maxQty() {
+        Market.Product p = Feed.snapshot.get(item);
+        double px = ticketPrice(p, Ticket.Side.BUY);
+        if (p == null || px <= 0 || Terminal.purse <= 0) return MAX_ORDER_UNITS;
+        return clampQty((long) Math.floor(Terminal.purse / px));
+    }
+
+    private static double ticketPrice(Market.Product p, Ticket.Side side) {
+        if (p == null) return 0;
+        return tPrice > 0 ? tPrice : Ticket.joinPrice(side, p.bid(), p.ask());
+    }
+
+    /** BUY 5k 120.5 NOW / SELL 130 NOW */
+    private void ticketCommand(Command.Parsed c) {
+        if (view != View.ITEM || item == null) { status("Open an item first, then " + c.fn() + ".", RED); return; }
+        boolean buy = c.fn() == Command.Fn.BUY, now = false;
+        double qty = -1, price = -1;
+        for (String t : c.item().split("\\s+")) {
+            if (t.isEmpty()) continue;
+            if (t.equals("NOW") || t.equals("INSTA")) { now = true; continue; }
+            double v = Ticket.parseNum(t);
+            if (v < 0) { status("Can't read \"" + t + "\". Try " + c.fn() + (buy ? " 5k 120.5" : " 130.5") + " [NOW]", RED); return; }
+            if (buy && qty < 0) qty = v; else price = v;
+        }
+        tSide = buy ? Ticket.Side.BUY : Ticket.Side.SELL;
+        if (qty >= 1) { Terminal.CONFIG.ticketQty = clampQty((long) qty); Terminal.CONFIG.save(); }
+        if (price > 0) tPrice = Ticket.round1(price);
+        placeTicket(now);
+    }
+
+    /** Hands the ticket to the Bazaar menus: opens /bz for the item and starts the green-slot guide. */
+    private void placeTicket(boolean instant) {
+        Market.Product p = Feed.snapshot.get(item);
+        if (p == null || item == null) { status("No live data for this item yet.", RED); return; }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.getConnection() == null) { status("Not connected to a server.", RED); return; }
+        Ticket.Side side = tSide;
+        long qty = 0;
+        if (side == Ticket.Side.BUY) {
+            qty = clampQty(Terminal.CONFIG.ticketQty);
+            double px = instant ? p.ask() : ticketPrice(p, side);
+            if (Terminal.purse > 0 && px * qty > Terminal.purse) {
+                status("Not enough coins: " + Fmt.px(px * qty) + " needed, purse " + Fmt.px(Terminal.purse) + ". Try QTY MAX.", RED);
+                return;
+            }
+        } else if (Guide.carrying(item) <= 0) {
+            status("You are not carrying any " + Feed.name(item) + ". A sell offer lists what is in your inventory.", RED);
+            return;
+        }
+        double price = instant ? 0 : ticketPrice(p, side);
+        Ticket.Active a = new Ticket.Active(item, Feed.name(item), side, instant ? Ticket.Mode.INSTA : Ticket.Mode.ORDER, price, qty, System.currentTimeMillis());
+        onClose();
+        Guide.launch(a);
+    }
+
+    private void drawTicket(Market.Product p, int x, int y, int w, int h, int mx, int my) {
+        gx.fill(x, y, x + w, y + h, PANEL);
+        gx.box(x, y, w, h, LINE);
+        boolean buy = tSide == Ticket.Side.BUY;
+        int side = buy ? GREEN : RED;
+        gx.t("ORDER TICKET", x + 5, y + 4, AMBER);
+        // side tabs
+        int tw = (w - 12) / 2, ty = y + 4 + LH + 1;
+        for (int i = 0; i < 2; i++) {
+            boolean on = (i == 0) == buy;
+            int tx = x + 4 + i * (tw + 4), col = i == 0 ? GREEN : RED;
+            gx.fill(tx, ty, tx + tw, ty + 12, on ? col : 0xFF1C1C1C);
+            String lab = i == 0 ? "BUY" : "SELL";
+            gx.tc(lab, tx + tw / 2, ty + 2, on ? BLACK : GRAY);
+            final Ticket.Side sd = i == 0 ? Ticket.Side.BUY : Ticket.Side.SELL;
+            hits.add(new Hit(tx, ty, tx + tw, ty + 12, () -> tSide = sd));
+        }
+        int ry = ty + 16;
+        long qty = clampQty(Terminal.CONFIG.ticketQty);
+        double px = ticketPrice(p, tSide);
+        String pxNote = tPrice > 0 ? "custom" : buy ? "bid+0.1" : "ask-0.1";
+        if (buy) {
+            gx.t("QTY", x + 5, ry, AMBER_DIM);
+            gx.tr(Fmt.qty(qty), x + w - 5, ry, WHITE);
+            ry += LH + 1;
+            long[] chips = {64, 640, 1000, 10000, -1};
+            String[] labs = {"64", "640", "1K", "10K", "MAX"};
+            int cx = x + 4, cw = (w - 8 - 4 * 2) / 5;
+            for (int i = 0; i < chips.length; i++) {
+                final long q = chips[i];
+                boolean on = q > 0 && q == qty;
+                gx.fill(cx, ry, cx + cw, ry + 11, on ? AMBER : 0xFF1C1C1C);
+                gx.tc(labs[i], cx + cw / 2, ry + 2, on ? BLACK : GRAY);
+                hits.add(new Hit(cx, ry, cx + cw, ry + 11, () -> {
+                    Terminal.CONFIG.ticketQty = q < 0 ? maxQty() : q;
+                    Terminal.CONFIG.save();
+                }));
+                cx += cw + 2;
+            }
+            ry += 14;
+        } else {
+            gx.t("CARRYING", x + 5, ry, AMBER_DIM);
+            gx.tr(Fmt.qty(Guide.carrying(item)), x + w - 5, ry, WHITE);
+            ry += LH + 1;
+            gx.t("sell offers list all you carry", x + 5, ry, DIM);
+            ry += 14;
+        }
+        gx.t("PRICE", x + 5, ry, AMBER_DIM);
+        gx.tr(Fmt.px(px) + " " + pxNote, x + w - 5, ry, side);
+        ry += LH + 1;
+        double total = (buy ? qty : Math.max(1, Guide.carrying(item))) * px;
+        gx.t(buy ? "TOTAL" : "PROCEEDS", x + 5, ry, AMBER_DIM);
+        String pct = buy && Terminal.purse > 0 ? String.format(Locale.US, "  %.0f%% of purse", total / Terminal.purse * 100) : "";
+        gx.tr(Fmt.px(total) + pct, x + w - 5, ry, WHITE);
+        ry += LH + 3;
+        // big GO button
+        int bx = x + 4, bw = w - 8;
+        String go = (buy ? "BUY ORDER" : "SELL OFFER") + "  <GO>";
+        boolean hov = mx >= bx && mx < bx + bw && my >= ry && my < ry + 14;
+        gx.fill(bx, ry, bx + bw, ry + 14, hov ? side : (side & 0x00FFFFFF) | 0xCC000000);
+        gx.tc(go, bx + bw / 2, ry + 3, BLACK);
+        hits.add(new Hit(bx, ry, bx + bw, ry + 14, () -> placeTicket(false)));
+        ry += 17;
+        String now = buy ? "BUY NOW at " + Fmt.px(p.ask()) : "SELL NOW at " + Fmt.px(p.bid());
+        boolean hov2 = mx >= bx && mx < bx + bw && my >= ry && my < ry + 12;
+        gx.fill(bx, ry, bx + bw, ry + 12, hov2 ? 0xFF2C2C2C : 0xFF1C1C1C);
+        gx.box(bx, ry, bw, 12, side);
+        gx.tc(now, bx + bw / 2, ry + 2, side);
+        hits.add(new Hit(bx, ry, bx + bw, ry + 12, () -> placeTicket(true)));
     }
 
     private void addOrDel(Command.Fn fn, String id) {

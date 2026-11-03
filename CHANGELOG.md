@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Order ticket on every item page: BUY / SELL tabs, quantity chips (64, 640, 1K, 10K, MAX from your purse), price that joins the best bid or ask (override with PX), total and share of purse.
+- BUY ORDER <GO> opens /bz for the item and points at the slot to click at each step, typing the amount and price into Hypixel's signs. Enter does one click per press. You confirm every step.
+- BUY NOW / SELL NOW for instant trades. Commands: BUY 5k 120.5, SELL 130.5, BUY 5k NOW, QTY, PX.
+- If Hypixel rejects a price, the guide re-fetches the book and retypes a fresh one.
+- F5 / F6 pick the side, Enter on an empty line places the ticket.
+
 ## 0.2.0
 - Terminal look: monospace font (IBM Plex Mono, bundled, OFL), panel bar, amber command line with block cursor, item line with large bid x ask, dark-red numbered toolbar, colored key caps. FONT MC switches back to Minecraft's font
 - Search as you type: matches with live price and 24h change under the command line; Up/Down, Tab or Enter

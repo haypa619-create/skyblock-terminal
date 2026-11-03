@@ -57,6 +57,7 @@ public final class Terminal implements ClientModInitializer {
         KeyMapping.Category cat = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("sbterminal", "main"));
         openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.sbterminal.open", InputConstants.Type.KEYSYM, InputConstants.KEY_B, cat));
         Feed.start();
+        Guide.init();
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             Screen p = pending;
             if (p != null) { pending = null; mc.gui.setScreen(p); }
@@ -90,6 +91,9 @@ public final class Terminal implements ClientModInitializer {
                     return 1;
                 }))));
     }
+
+    /** Opens a screen on the next tick (safe from any event). */
+    static void show(Screen s) { pending = s; }
 
     /** The Bazaar product id for an item stack: its SkyBlock id, or a name match. null if it isn't on the Bazaar. */
     static String bazaarId(ItemStack stack) {

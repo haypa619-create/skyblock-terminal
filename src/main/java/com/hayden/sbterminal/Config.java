@@ -18,6 +18,8 @@ public final class Config {
     public int pollOpenSecs = 5, pollClosedSecs = 20;
     /** Terminal font: true = bundled monospace (IBM Plex Mono), false = Minecraft's. */
     public boolean monoFont = true;
+    /** Order ticket: last quantity used for buy orders. */
+    public long ticketQty = 1000;
     /** Where you were, so the terminal reopens there. */
     public String lastView = "MON", lastItem = null, lastRange = "D1";
 

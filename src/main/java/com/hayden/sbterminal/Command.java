@@ -16,13 +16,15 @@ import java.util.Set;
  * Anything that isn't a function code is treated as an item.
  */
 public final class Command {
-    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, ITEM, EMPTY }
+    public enum Fn { MON, MOV, SCR, HELP, ADD, DEL, FONT, BUY, SELL, QTY, PX, ITEM, EMPTY }
 
     /** Function codes, for the autocomplete dropdown. */
     public static final String[][] CODES = {
             {"MON", "Monitor (your watchlist)"}, {"MOV", "Movers"}, {"SCR", "Screener"}, {"HELP", "Commands and keys"},
             {"ADD", "Add an item to your Monitor"}, {"DEL", "Remove an item from your Monitor"},
-            {"FONT", "FONT MONO or FONT MC"}};
+            {"FONT", "FONT MONO or FONT MC"},
+            {"BUY", "BUY 5k [price] [NOW]: open the order in the Bazaar"}, {"SELL", "SELL [price] [NOW]: list what you carry"},
+            {"QTY", "QTY 5k or QTY MAX: ticket quantity"}, {"PX", "PX 123.4 or PX AUTO: ticket price"}};
     public enum Range {
         H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L);
         public final String label;
@@ -45,6 +47,10 @@ public final class Command {
             case "MON", "W", "WATCH" -> { return simple(Fn.MON); }
             case "MOV", "MOST", "TOP" -> { return simple(Fn.MOV); }
             case "HELP", "?" -> { return simple(Fn.HELP); }
+            case "BUY", "SELL", "QTY", "PX" -> {
+                Fn fn = Fn.valueOf(head);
+                return new Parsed(fn, s.substring(w[0].length()).trim().toUpperCase(Locale.US), null, null, List.of(), null);
+            }
             case "FONT" -> { return new Parsed(Fn.FONT, w.length > 1 ? w[1].toUpperCase(Locale.US) : "", null, null, List.of(), null); }
             case "SCR", "EQS", "SCREEN" -> {
                 List<Screener.Filter> fs = new ArrayList<>();

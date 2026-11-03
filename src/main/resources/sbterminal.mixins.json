@@ -2,6 +2,6 @@
   "required": true,
   "package": "com.hayden.sbterminal.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["HoveredSlotAccessor"],
+  "client": ["HoveredSlotAccessor", "SignEditAccessor", "ContainerScreenAccessor"],
   "injectors": { "defaultRequire": 1 }
 }

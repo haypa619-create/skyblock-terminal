@@ -52,6 +52,14 @@ public final class Feed {
         HISTORY.scheduleWithFixedDelay(Feed::backfillStep, 20, 3, TimeUnit.SECONDS);
     }
 
+    /** One synchronous price refresh (used after Hypixel rejects a price). */
+    public static void refreshNow() throws Exception {
+        long now = System.currentTimeMillis();
+        Market.Snapshot s = Market.parse(Http.get(Market.BAZAAR_URL), now);
+        snapshot = s;
+        lastPoll = now;
+    }
+
     private static void tick() {
         long now = System.currentTimeMillis();
         int every = terminalOpen ? Terminal.CONFIG.pollOpenSecs : Terminal.CONFIG.pollClosedSecs;
