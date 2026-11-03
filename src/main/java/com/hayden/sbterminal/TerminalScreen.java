@@ -89,6 +89,19 @@ public final class TerminalScreen extends Screen {
         super(Component.literal("SkyBlock Terminal"));
     }
 
+    /** The normal way in (B key, /sbt): the Monitor, unless config reopenLast is on. */
+    public static TerminalScreen home() {
+        TerminalScreen s = new TerminalScreen();
+        restoreOnce();
+        if (!Terminal.CONFIG.reopenLast) {
+            view = View.MON;
+            sel = 0;
+            scroll = 0;
+            back.clear();
+        }
+        return s;
+    }
+
     /** Opens straight to an item (hover + B, /sbt radar). */
     public static TerminalScreen forItem(String id) {
         TerminalScreen s = new TerminalScreen();

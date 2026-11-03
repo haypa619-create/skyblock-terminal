@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.9
+
+- The terminal always opens on the Monitor when you press B or type /sbt. Hover + B on an item and /sbt <item> still open that item. To go back to reopening where you left off, set "reopenLast": true in config/sbterminal.json.
+
 ## 0.5.8
 
 - The "n/a" in the 24h column is fixed. History used to load only for the 200 busiest items, so everything else showed n/a. Now any item that is on screen (Monitor, sector and screener rows, search dropdown) loads its own 24h history, showing "..." while it loads. The search dropdown waits until you stop typing for a moment so it doesn't fire a request per keystroke.

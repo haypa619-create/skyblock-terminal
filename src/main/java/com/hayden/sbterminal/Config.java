@@ -33,6 +33,8 @@ public final class Config {
     public List<Alerts.Rule> priceAlerts = new ArrayList<>();
     /** Order ticket: last quantity used for buy orders. */
     public long ticketQty = 1000;
+    /** false: B and /sbt always open the Monitor. true: reopen on the screen you left. */
+    public boolean reopenLast = false;
     /** Where you were, so the terminal reopens there. */
     public String lastView = "MON", lastItem = null, lastRange = "D1";
 

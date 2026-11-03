@@ -78,7 +78,7 @@ public final class Terminal implements ClientModInitializer {
             if (p != null) { pending = null; mc.gui.setScreen(p); }
             boolean pressed = false;
             while (openKey.consumeClick()) pressed = true;
-            if (pressed) mc.gui.setScreen(new TerminalScreen());
+            if (pressed) mc.gui.setScreen(TerminalScreen.home());
             if (++ticks % 20 == 0) readPurse(mc);
             if (ticks % 40 == 0 && CONFIG.alerts) checkOutbid(mc);
             if (ticks % 40 == 20) checkPriceAlerts(mc);
@@ -100,7 +100,7 @@ public final class Terminal implements ClientModInitializer {
         // /sbt            open the terminal
         // /sbt <item>     open it on an item
         ClientCommandRegistrationCallback.EVENT.register((d, reg) -> d.register(literal("sbt")
-                .executes(c -> { pending = new TerminalScreen(); return 1; })
+                .executes(c -> { pending = TerminalScreen.home(); return 1; })
                 .then(argument("item", StringArgumentType.greedyString()).executes(c -> {
                     String q = StringArgumentType.getString(c, "item");
                     List<String> m = Items.find(q, Feed.snapshot.products().keySet(), Feed.names, Feed::rankVolume, 1);
