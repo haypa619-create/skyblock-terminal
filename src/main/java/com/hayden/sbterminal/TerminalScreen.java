@@ -800,7 +800,11 @@ public final class TerminalScreen extends Screen {
         suggestSel = 0;
         if (q.isEmpty() || q.matches("\\d+")) { suggest = List.of(); return; }
         Command.Parsed c = Command.parse(q);
-        String term = c.fn() == Command.Fn.ITEM || c.fn() == Command.Fn.ADD || c.fn() == Command.Fn.DEL ? c.item() : null;
+        String term = switch (c.fn()) {
+            case ITEM, ADD, DEL, CMP -> c.item();
+            case ALERT, POS -> itemPart(c.fn(), c.item())[0];
+            default -> null;
+        };
         List<String> out = new ArrayList<>();
         String up = q.toUpperCase(Locale.US);
         if (!up.contains(" ")) for (String[] code : Command.CODES) if (code[0].startsWith(up)) out.add("#" + code[0]);
@@ -809,6 +813,16 @@ public final class TerminalScreen extends Screen {
             out.addAll(f.subList(0, Math.min(8, f.size())));
         }
         suggest = out;
+    }
+
+    private static final java.util.regex.Pattern ALERT_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+(?:BID|ASK|SPR|CHG1H|PX|PRICE|MID)\\b.*|\\s*[<>].*)?$");
+    private static final java.util.regex.Pattern POS_TAIL = java.util.regex.Pattern.compile("(?i)^(.*?)(\\s+[\\d.,]+[kmb]?(?:\\s.*)?)?$");
+
+    /** Splits "enchanted coal BID > 5" or "coal 500 130" into the item words and what follows them. */
+    private static String[] itemPart(Command.Fn fn, String args) {
+        java.util.regex.Matcher m = (fn == Command.Fn.ALERT ? ALERT_TAIL : POS_TAIL).matcher(args == null ? "" : args.trim());
+        if (!m.matches()) return new String[]{args == null ? "" : args, ""};
+        return new String[]{m.group(1).trim(), m.group(2) == null ? "" : m.group(2)};
     }
 
     private void drawSuggestions(int mx, int my) {
@@ -847,14 +861,24 @@ public final class TerminalScreen extends Screen {
         String s = suggest.get(Math.min(suggestSel, suggest.size() - 1));
         if (s.startsWith("#")) {
             String code = s.substring(1);
-            if (code.equals("ADD") || code.equals("DEL") || code.equals("FONT")) { cmd = code + " "; updateSuggestions(); }
+            if (java.util.Set.of("ADD", "DEL", "FONT", "CMP", "ALERT", "POS", "BUY", "SELL", "QTY", "PX").contains(code)) { cmd = code + " "; updateSuggestions(); }
             else { cmd = ""; suggest = List.of(); run(code); }
             return;
         }
         Command.Parsed c = Command.parse(cmd);
+        String typed = cmd;
         cmd = "";
         suggest = List.of();
         if (c.fn() == Command.Fn.ADD || c.fn() == Command.Fn.DEL) { addOrDel(c.fn(), s); return; }
+        if (c.fn() == Command.Fn.CMP) { run("CMP " + Feed.name(s)); return; }
+        if (c.fn() == Command.Fn.ALERT || c.fn() == Command.Fn.POS) {
+            String head = c.fn() == Command.Fn.ALERT ? "ALERT " : "POS ";
+            String tail = itemPart(c.fn(), c.item())[1];
+            if (tail.isBlank()) tail = c.fn() == Command.Fn.ALERT ? " < " : " ";
+            cmd = head + Feed.name(s) + (tail.startsWith(" ") ? tail : " " + tail);
+            status(c.fn() == Command.Fn.ALERT ? "Type the price and press Enter" : "Type units and cost, e.g. 500 130.5", GRAY);
+            return;
+        }
         if (c.range() != null) range = c.range();
         open(s);
     }

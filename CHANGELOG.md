@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3
+
+- The search dropdown now works after CMP, ALERT and POS, not only for opening, ADD and DEL. Pick a match with Tab, Enter or a click. For ALERT and POS it fills in the item name and keeps the rest of what you typed.
+- Typing CMP, ALERT, POS, BUY, SELL, QTY or PX from the code list now leaves the cursor ready for the argument instead of running with nothing.
+
 ## 0.5.2
 
 - Fixed the F7 PORT footer key overlapping the view hints.
