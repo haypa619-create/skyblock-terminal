@@ -1170,8 +1170,8 @@ public final class TerminalScreen extends Screen {
 
     // ---------- SEAS: SkyBlock-year clock ----------
 
-    private static final String[] SCOLS = {"STARTS IN", "ITEM", "WHEN (SkyBlock date)", "AVG MOVE", "UP", "YEARS", "STRENGTH", "TRADE"};
-    private static final double[] SCOLW = {0.08, 0.17, 0.38, 0.08, 0.06, 0.06, 0.07, 0.10};
+    private static final String[] YCOLS = {"STARTS IN", "ITEM", "WHEN (SkyBlock date)", "AVG MOVE", "UP", "YEARS", "STRENGTH", "TRADE"};
+    private static final double[] YCOLW = {0.08, 0.17, 0.38, 0.08, 0.06, 0.06, 0.07, 0.10};
 
     private void drawSeas(int top, int bottom, int mx, int my) {
         long now = System.currentTimeMillis();
@@ -1181,7 +1181,7 @@ public final class TerminalScreen extends Screen {
         res.sort(Comparator.comparingInt((Seasons.Effect e) -> Math.floorMod(e.slot() - cur, Seasons.SLOTS)).thenComparingDouble(e -> -e.mean()));
         int x = gx.t(res.size() + " PATTERNS", 6, top + 2, AMBER) + 10;
         gx.t(gx.fit(Archive.phase + ". " + Archive.studied + " items studied. Now: " + Seasons.label(cur) + ". Each row: the move from the start to the end of that ~6h slot, averaged over every past SkyBlock year. Shown only if strong and the same in older and newer history.", width - x - 10), x, top + 2, GRAY);
-        Table t = new Table(SCOLS, SCOLW);
+        Table t = new Table(YCOLS, YCOLW);
         t.header(top + LH + 4, -1, false, c -> {});
         List<String> ids = new ArrayList<>();
         for (Seasons.Effect e : res) ids.add(e.id());
