@@ -911,9 +911,6 @@ public final class TerminalScreen extends Screen {
         if (Terminal.CONFIG.bollinger) bollinger(pts, from, span, lo, hi, px, py, pw, ph);
         plot(pts, true, from, span, lo, hi, px, py, pw, ph, GREEN);
         plot(pts, false, from, span, lo, hi, px, py, pw, ph, BLUE);
-        if (range.span > dataMs && chartSpan == 0 && chartPan == 0) {
-            gx.t("all recorded data since " + label(first, 30L * 86_400_000L) + " (longer ranges fill in as you play)", px + 4, py + ph - 10, DIM);
-        }
         tag(p.ask(), lo, hi, px + pw, py, ph, BLUE);
         tag(p.bid(), lo, hi, px + pw, py, ph, GREEN);
         if (mx >= px && mx < px + pw && my >= py && my < py + ph) {
@@ -982,6 +979,7 @@ public final class TerminalScreen extends Screen {
 
     private String label(long t, long span) {
         java.time.ZonedDateTime z = java.time.Instant.ofEpochMilli(t).atZone(java.time.ZoneId.systemDefault());
+        if (span >= 200L * 86_400_000L) return z.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.US));
         if (span >= 14L * 86_400_000L) return z.format(DateTimeFormatter.ofPattern("MMM d", Locale.US));
         return span <= 86_400_000L ? z.format(DateTimeFormatter.ofPattern("HH:mm")) : z.format(DateTimeFormatter.ofPattern("EEE HH:mm", Locale.US));
     }
@@ -1845,9 +1843,10 @@ public final class TerminalScreen extends Screen {
 
     /** Price history for the chart range: day data, week data, or the terminal's own 2-hourly record for 1M / 3M. */
     private List<Bars.Point> sourceFor(String id) {
-        if (range == Command.Range.M1 || range == Command.Range.M3) {
+        if (range.span > 7 * 86_400_000L) { // daily candles since 2020, then 2-hour bars for the last week, then live recording
+            List<Bars.Point> lg = Feed.longHistory(id);
             List<Bars.Point> wk = Feed.week(id);
-            List<Bars.Point> base = Bars.merge(wk == null ? new ArrayList<>() : wk, Feed.LONG.points(id));
+            List<Bars.Point> base = Bars.merge(lg == null ? new ArrayList<>() : lg, wk == null ? new ArrayList<>() : wk);
             return Bars.merge(base, Feed.RECORDER.points(id));
         }
         if (range == Command.Range.W1 || range == Command.Range.D3) {

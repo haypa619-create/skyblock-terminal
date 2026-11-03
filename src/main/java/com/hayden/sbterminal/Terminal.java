@@ -58,7 +58,6 @@ public final class Terminal implements ClientModInitializer {
         KeyMapping.Category cat = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("sbterminal", "main"));
         openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.sbterminal.open", InputConstants.Type.KEYSYM, InputConstants.KEY_B, cat));
         PORT = Portfolio.load(FabricLoader.getInstance().getConfigDir());
-        Feed.initLong(FabricLoader.getInstance().getConfigDir());
         Feed.start();
         Guide.init();
         net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {

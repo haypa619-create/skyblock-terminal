@@ -33,7 +33,7 @@ public final class Command {
             {"NOTIFY", "NOTIFY FILLED OFF, SOUND GOOD BELL, LIMIT 85"}, {"BB", "Bollinger bands on the chart on/off"}, {"BIND", "BIND FLIP, BIND FLIP F6, BIND RESET: set your hotkeys"}};
     public enum Range {
         H1("1H", 3_600_000L), H6("6H", 6 * 3_600_000L), D1("1D", 86_400_000L), D3("3D", 3 * 86_400_000L), W1("1W", 7 * 86_400_000L),
-        M1("1M", 30 * 86_400_000L), M3("3M", 90 * 86_400_000L);
+        M1("1M", 30 * 86_400_000L), M3("3M", 90 * 86_400_000L), Y1("1Y", 365 * 86_400_000L), ALL("ALL", 3650L * 86_400_000L);
         public final String label;
         public final long span;
         Range(String label, long span) { this.label = label; this.span = span; }
@@ -115,6 +115,8 @@ public final class Command {
             case "1W", "7D" -> Range.W1;
             case "1M", "30D" -> Range.M1;
             case "3M", "90D" -> Range.M3;
+            case "1Y", "365D" -> Range.Y1;
+            case "ALL", "MAX" -> Range.ALL;
             default -> null;
         };
     }

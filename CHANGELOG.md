@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.0
+- Years of history: 1M, 3M, 1Y and ALL charts now load daily candles back to 2020 from Coflnet's custom-range endpoint (loaded when you open the item, cached 6 hours), then 2-hour bars for the last week, then live recording. Drag and scroll to explore. The own 2-hour recording file is gone (no longer needed).
+
 ## 0.7.4
 - Fix: Bollinger bands drew long diagonal lines from the top-left corner.
 - Chart is interactive: scroll to zoom (around the mouse), drag to pan, FIT button resets. Ranges never stretch wider than the data you have, so 1M / 3M fill the chart instead of sitting in one corner.

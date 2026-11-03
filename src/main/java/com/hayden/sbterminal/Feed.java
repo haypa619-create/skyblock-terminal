@@ -22,22 +22,14 @@ public final class Feed {
     public static volatile String error = null;
     public static volatile boolean terminalOpen = false;
     public static final Recorder RECORDER = new Recorder();
-    /** 2-hourly record of every item for 92 days (1M and 3M charts). */
-    public static volatile LongStore LONG = new LongStore();
-    private static volatile java.nio.file.Path longFile = null;
-    private static volatile long longSavedAt = 0;
+    /** Daily candles back to 2020 from Coflnet's custom-range endpoint, loaded on demand (1M, 3M, 1Y, ALL charts). */
+    private static final Map<String, Hist> LONGH = new ConcurrentHashMap<>();
+    private static final long LONG_TTL = 6 * 3_600_000L;
+    public static final String COFLNET_RANGE = "https://sky.coflnet.com/api/bazaar/%s/history?start=2020-06-01T00:00:00Z&end=%s";
 
-    /** Loads the saved long history. Call once before start(). */
-    public static void initLong(java.nio.file.Path dir) {
-        longFile = dir.resolve("sbterminal-history.bin");
-        LONG = LongStore.load(longFile);
-        Runtime.getRuntime().addShutdownHook(new Thread(Feed::saveLong));
-    }
-
-    static void saveLong() {
-        java.nio.file.Path f = longFile;
-        if (f == null) return;
-        try { LONG.save(f); longSavedAt = System.currentTimeMillis(); } catch (Exception e) { Terminal.LOG.warn("Could not save long history: {}", e.toString()); }
+    /** Daily history since 2020 (null while loading). Requests it if missing or stale. */
+    public static List<Bars.Point> longHistory(String id) {
+        return hist(LONGH, id, "long", LONG_TTL);
     }
 
     private record Hist(List<Bars.Point> pts, long fetchedAt) {}
@@ -102,7 +94,6 @@ public final class Feed {
             if (s.hypixelUpdated() != snapshot.hypixelUpdated() || snapshot.products().isEmpty()) {
                 snapshot = s;
                 RECORDER.record(s, now);
-                if (LONG.record(s, now) || now - longSavedAt > 30 * 60_000L && longFile != null) HISTORY.execute(Feed::saveLong);
             }
             error = null;
         } catch (Exception e) {
@@ -122,7 +113,7 @@ public final class Feed {
     }
 
     public static boolean loading(String id) {
-        return LOADING.containsKey(id + "day") || LOADING.containsKey(id + "week");
+        return LOADING.containsKey(id + "day") || LOADING.containsKey(id + "week") || LOADING.containsKey(id + "long");
     }
 
     private static List<Bars.Point> hist(Map<String, Hist> cache, String id, String range, long ttl) {
@@ -135,9 +126,13 @@ public final class Feed {
         if (LOADING.putIfAbsent(id + range, Boolean.TRUE) != null) return;
         Runnable job = () -> {
             try {
-                cache.put(id, new Hist(Bars.parseCoflnet(Http.get(String.format(Bars.COFLNET, id, range))), System.currentTimeMillis()));
+                String url = range.equals("long")
+                        ? String.format(COFLNET_RANGE, id, java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS))
+                        : String.format(Bars.COFLNET, id, range);
+                cache.put(id, new Hist(Bars.parseCoflnet(Http.get(url)), System.currentTimeMillis()));
             } catch (Exception e) {
-                cache.put(id, new Hist(List.of(), System.currentTimeMillis())); // don't hammer a failing item
+                long age = range.equals("long") ? LONG_TTL - 120_000L : 0; // a failed long fetch retries after 2 minutes
+                cache.put(id, new Hist(List.of(), System.currentTimeMillis() - age)); // don't hammer a failing item
             } finally {
                 LOADING.remove(id + range);
             }
