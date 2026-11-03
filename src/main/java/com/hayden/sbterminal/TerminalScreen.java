@@ -40,7 +40,7 @@ public final class TerminalScreen extends Screen {
             SEL = 0xFF0E3A78, HOVER = 0xFF141414, TOOLBAR = 0xFF6E1010, TOOL_HOVER = 0xFF9A1C1C;
     static final int LH = 11;
 
-    enum View { MON, MOV, SCR, ITEM, HELP, PICK }
+    enum View { MON, MOV, SCR, ITEM, PORT, HELP, PICK }
 
     private record Place(View view, String item) {}
 
@@ -162,6 +162,7 @@ public final class TerminalScreen extends Screen {
             case MOV -> drawMovers(y, bottom, mx, my);
             case SCR -> drawScreener(y, bottom, mx, my);
             case ITEM -> drawItem(y, bottom, mx, my);
+            case PORT -> drawPortfolio(y, bottom, mx, my);
             case HELP -> drawHelp(y, bottom);
             case PICK -> drawPick(y, bottom, mx, my);
         }
@@ -190,6 +191,7 @@ public final class TerminalScreen extends Screen {
             case MOV -> "MOV";
             case SCR -> "SCR";
             case ITEM -> "DES";
+            case PORT -> "PORT";
             case HELP -> "HELP";
             case PICK -> "FIND";
         };
@@ -201,6 +203,7 @@ public final class TerminalScreen extends Screen {
             case MOV -> "Movers";
             case SCR -> "Screener";
             case ITEM -> Feed.name(item) + "  Bazaar";
+            case PORT -> "Portfolio";
             case HELP -> "Help";
             case PICK -> "Item search";
         };
@@ -280,6 +283,7 @@ public final class TerminalScreen extends Screen {
         else if (view == View.MOV) cap("←→", "1H/24H", GRAY, x, y);
         else if (view == View.SCR) cap("←→", "sort", GRAY, x, y);
         else if (view == View.MON) cap("Shift↑↓", "move", GRAY, x, y);
+        if (view != View.ITEM) cap("F7", "PORT", YELLOW, x + 0, y); 
         String bf = Feed.backfillStatus();
         if (!bf.isEmpty()) gx.tr(bf, width - 4, y + 3, DIM);
     }
@@ -313,6 +317,12 @@ public final class TerminalScreen extends Screen {
                 a.add(new Action("Move up", () -> moveSelected(-1)));
                 a.add(new Action("Move down", () -> moveSelected(1)));
                 a.add(new Action("My order", () -> monSort = -1));
+            }
+            case PORT -> {
+                a.add(new Action("Open item", () -> { if (sel < rows.size()) open(rows.get(sel)); }));
+                a.add(new Action("Set cost", () -> { if (sel < rows.size()) { cmd = "POS " + Feed.name(rows.get(sel)) + " "; status("Type units and cost, e.g. 500 130.5", GRAY); } }));
+                a.add(new Action("Remove position", this::removeSelected));
+                a.add(new Action("Clear orders", () -> { Terminal.PORT.orders.clear(); Terminal.PORT.save(); status("Cleared the tracked order list", GRAY); }));
             }
             case MOV -> {
                 a.add(new Action("24 hours", () -> { moversDay = true; sel = 0; scroll = 0; }));
@@ -683,6 +693,8 @@ public final class TerminalScreen extends Screen {
                 {"BUY 5k 120.5", "on an item page: open that buy order in the Bazaar, numbers filled in"},
                 {"SELL 130.5 / BUY 5k NOW", "list what you carry / buy or sell instantly"},
                 {"QTY 5k / PX 123.4", "ticket quantity and price (PX AUTO = join the best bid or ask)"},
+                {"PORT / F7", "portfolio: positions, cost, P&L, open orders (built from Bazaar chat)"},
+                {"POS coal 500 130.5", "set a position by hand (units 0 removes it)"},
                 {"FONT MONO / FONT MC", "terminal font or Minecraft font"},
                 {"2 <GO>", "run toolbar action 2 (or click it)"},
                 {"", ""},
@@ -901,11 +913,12 @@ public final class TerminalScreen extends Screen {
             case 268 -> { sel = 0; return true; }
             case 269 -> { sel = Math.max(0, rows.size() - 1); return true; }
             case 263, 262 -> { horizontal(k == 262 ? 1 : -1); return true; }
-            case 261 -> { if (view == View.MON) removeSelected(); return true; }
+            case 261 -> { if (view == View.MON || view == View.PORT) removeSelected(); return true; }
             case 290 -> { go(View.HELP, null); return true; }
             case 291 -> { go(View.MON, null); return true; }
             case 292 -> { go(View.MOV, null); return true; }
             case 293 -> { go(View.SCR, null); return true; }
+            case 296 -> { go(View.PORT, null); return true; }
             case 294 -> { if (view == View.ITEM) tSide = Ticket.Side.BUY; return true; }
             case 295 -> { if (view == View.ITEM) tSide = Ticket.Side.SELL; return true; }
             default -> { return super.keyPressed(e); }
@@ -1009,6 +1022,8 @@ public final class TerminalScreen extends Screen {
                 if (m.size() == 1 || exact(c.item(), m.get(0))) open(m.get(0));
                 else { pick = m; go(View.PICK, null); }
             }
+            case PORT -> go(View.PORT, null);
+            case POS -> posCommand(c.item());
             case BUY, SELL -> ticketCommand(c);
             case QTY -> {
                 if (c.item().equals("MAX")) { Terminal.CONFIG.ticketQty = maxQty(); }
@@ -1030,6 +1045,126 @@ public final class TerminalScreen extends Screen {
             case EMPTY -> {}
         }
     }
+
+    // ---------- portfolio ----------
+
+    /** POS enchanted coal 500 130.5   (units 0 removes it) */
+    private void posCommand(String args) {
+        String[] w = args.trim().split("\\s+");
+        if (w.length < 2) { status("POS <item> <units> <cost>, e.g. POS enchanted coal 500 130.5", RED); return; }
+        double cost = -1, units;
+        int end = w.length;
+        if (w.length >= 3 && Ticket.parseNum(w[w.length - 1]) >= 0 && Ticket.parseNum(w[w.length - 2]) >= 0) {
+            cost = Ticket.parseNum(w[w.length - 1]);
+            units = Ticket.parseNum(w[w.length - 2]);
+            end = w.length - 2;
+        } else if (Ticket.parseNum(w[w.length - 1]) >= 0) {
+            units = Ticket.parseNum(w[w.length - 1]);
+            end = w.length - 1;
+        } else { status("POS <item> <units> <cost>", RED); return; }
+        String q = String.join(" ", java.util.Arrays.copyOfRange(w, 0, end));
+        List<String> m = find(q);
+        if (m.isEmpty()) { status("No Bazaar item matches \"" + q + "\"", RED); return; }
+        String id = m.get(0);
+        if (units <= 0) { Terminal.PORT.removePosition(Feed.name(id)); Terminal.PORT.save(); status("Removed " + Feed.name(id), GRAY); return; }
+        if (cost < 0) {
+            Market.Product p = Feed.snapshot.get(id);
+            if (p == null) { status("Give a cost too: POS " + q + " " + Fmt.qty(units) + " <cost>", RED); return; }
+            cost = p.mid();
+        }
+        Terminal.PORT.setPosition(Feed.name(id), units, cost);
+        Terminal.PORT.save();
+        status("Position: " + Fmt.qty(units) + " " + Feed.name(id) + " at " + Fmt.px(cost), GREEN);
+    }
+
+    private static final String[] PCOLS = {"ITEM", "UNITS", "AVG COST", "BID", "VALUE", "P&L", "P&L %"};
+    private static final double[] PCOLW = {0.30, 0.11, 0.14, 0.13, 0.14, 0.10, 0.08};
+
+    private void drawPortfolio(int top, int bottom, int mx, int my) {
+        long now = System.currentTimeMillis();
+        double tax = 1 - Terminal.CONFIG.taxPct / 100.0;
+        List<Portfolio.Pos> ps = Terminal.PORT.positionList();
+        double value = 0, cost = 0;
+        for (Portfolio.Pos p : ps) {
+            String id = Feed.idForName(p.name);
+            Market.Product mk = id == null ? null : Feed.snapshot.get(id);
+            cost += p.units * p.cost;
+            value += p.units * (mk == null ? p.cost : mk.bid() * tax);
+        }
+        double unreal = value - cost, today = Terminal.PORT.realizedOn(Portfolio.day(now));
+        int x = 6;
+        x = pair("VALUE ", Fmt.px(value), x, top + 2, WHITE);
+        x = pair("COST ", Fmt.px(cost), x, top + 2, GRAY);
+        x = pair("UNREAL ", signed(unreal), x, top + 2, changeColor(unreal));
+        x = pair("TODAY ", signed(today), x, top + 2, changeColor(today));
+        x = pair("ALL TIME ", signed(Terminal.PORT.realizedAll), x, top + 2, changeColor(Terminal.PORT.realizedAll));
+        if (Terminal.purse >= 0) pair("PURSE ", Fmt.px(Terminal.purse), x, top + 2, AMBER);
+
+        List<Portfolio.Order> os = Terminal.PORT.orderList();
+        int orderRows = os.isEmpty() ? 2 : Math.min(os.size(), 8) + 2;
+        int ordersTop = bottom - orderRows * LH - 2;
+        int y0 = top + LH + 4;
+        Table t = new Table(PCOLS, PCOLW);
+        t.header(y0, -1, false, c -> {});
+        y0 += LH + 2;
+        ps.sort(Comparator.comparingDouble((Portfolio.Pos p) -> -p.units * p.cost));
+        List<String> ids = new ArrayList<>();
+        for (Portfolio.Pos p : ps) { String id = Feed.idForName(p.name); ids.add(id == null ? p.name : id); }
+        rows = ids;
+        if (ps.isEmpty()) {
+            gx.t("No positions yet. They build themselves from your Bazaar claims and insta-trades.", 6, y0 + 2, GRAY);
+            gx.t("Bought something before? POS enchanted coal 500 130.5 sets it by hand.", 6, y0 + 2 + LH, DIM);
+        }
+        int fit = Math.max(1, (ordersTop - y0) / LH);
+        clampSel(ids.size(), fit);
+        for (int i = scroll; i < Math.min(ps.size(), scroll + fit); i++) {
+            Portfolio.Pos p = ps.get(i);
+            String id = ids.get(i);
+            int y = y0 + (i - scroll) * LH, idx = i;
+            Market.Product mk = Feed.snapshot.get(id);
+            rowBackground(y, i == sel, mx, my, () -> { sel = idx; if (Feed.snapshot.get(id) != null) open(id); });
+            t.cell(0, y, p.name, i == sel ? AMBER : WHITE, 0);
+            t.cell(1, y, Fmt.qty(p.units), WHITE, 0);
+            t.cell(2, y, Fmt.px(p.cost), GRAY, 0);
+            if (mk == null) { t.cell(3, y, "-", DIM, 0); continue; }
+            double v = p.units * mk.bid() * tax, pnl = v - p.units * p.cost, pct = p.cost > 0 ? pnl / (p.units * p.cost) * 100 : 0;
+            t.cell(3, y, Fmt.px(mk.bid()), GREEN, 0);
+            t.cell(4, y, Fmt.px(v), WHITE, 0);
+            t.cell(5, y, signed(pnl), changeColor(pnl), 0);
+            t.cell(6, y, Fmt.pct(pct), changeColor(pnl), 0);
+        }
+        if (Terminal.PORT.untrackedUnits > 0) gx.tr(Fmt.qty(Terminal.PORT.untrackedUnits) + " units sold with no tracked cost", width - 6, top + LH + 4 + 0, DIM);
+
+        // open orders
+        gx.hline(4, width - 4, ordersTop - 1, LINE);
+        int oy = ordersTop + 1;
+        gx.t("OPEN ORDERS (" + os.size() + ")", 6, oy, AMBER);
+        gx.t("from Bazaar chat messages; Manage Orders in game is the source of truth", 14 + gx.w("OPEN ORDERS (99)"), oy, DIM);
+        oy += LH;
+        if (os.isEmpty()) gx.t("None tracked. Orders you place after the terminal loads show up here.", 6, oy, DIM);
+        os.sort(Comparator.comparingLong((Portfolio.Order o) -> -o.at));
+        for (int i = 0; i < Math.min(os.size(), 8); i++, oy += LH) {
+            Portfolio.Order o = os.get(i);
+            String id = Feed.idForName(o.name);
+            Market.Product mk = id == null ? null : Feed.snapshot.get(id);
+            Portfolio.Status st = Portfolio.status(o, mk);
+            final String fid = id;
+            if (mx >= 0 && my >= oy - 1 && my < oy + LH - 1) gx.fill(0, oy - 1, width, oy + LH - 1, HOVER);
+            hits.add(new Hit(0, oy - 1, width, oy + LH - 1, () -> { if (fid != null) open(fid); }));
+            gx.t(o.buy ? "BUY" : "SELL", 6, oy, o.buy ? GREEN : RED);
+            gx.t(gx.fit(o.name, (int) (width * 0.26)), 6 + gx.cw() * 5, oy, WHITE);
+            gx.tr(Fmt.qty(o.units) + " @ " + Fmt.px(o.price), (int) (width * 0.55), oy, GRAY);
+            String s = switch (st) {
+                case FILLED -> "FILLED - claim it";
+                case TOP -> "ON TOP";
+                case BEHIND -> (o.buy ? "OUTBID, best " : "UNDERCUT, best ") + (mk == null ? "-" : Fmt.px(o.buy ? mk.bid() : mk.ask()));
+            };
+            gx.t(s, (int) (width * 0.58), oy, st == Portfolio.Status.TOP ? GREEN : st == Portfolio.Status.FILLED ? YELLOW : RED);
+            gx.tr(Fmt.ago(now - o.at), width - 6, oy, DIM);
+        }
+    }
+
+    private static String signed(double v) { return (v >= 0 ? "+" : "-") + Fmt.px(Math.abs(v)); }
 
     // ---------- order ticket ----------
 
@@ -1207,6 +1342,12 @@ public final class TerminalScreen extends Screen {
     }
 
     private void removeSelected() {
+        if (view == View.PORT && sel < rows.size()) {
+            Terminal.PORT.removePosition(Feed.name(rows.get(sel)));
+            Terminal.PORT.save();
+            status("Removed " + Feed.name(rows.get(sel)) + " from the portfolio", GRAY);
+            return;
+        }
         if (view != View.MON || sel >= rows.size()) return;
         addOrDel(Command.Fn.DEL, rows.get(sel));
     }

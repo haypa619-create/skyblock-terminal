@@ -44,6 +44,7 @@ public final class Terminal implements ClientModInitializer {
     public static final Logger LOG = LoggerFactory.getLogger("sbterminal");
     public static Config CONFIG;
     public static volatile double purse = -1;
+    public static Portfolio PORT;
 
     private static KeyMapping openKey;
     private static int ticks = 0;
@@ -56,8 +57,18 @@ public final class Terminal implements ClientModInitializer {
         CONFIG = Config.load(FabricLoader.getInstance().getConfigDir());
         KeyMapping.Category cat = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("sbterminal", "main"));
         openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.sbterminal.open", InputConstants.Type.KEYSYM, InputConstants.KEY_B, cat));
+        PORT = Portfolio.load(FabricLoader.getInstance().getConfigDir());
         Feed.start();
         Guide.init();
+        net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+            if (overlay) return;
+            String text = message.getString();
+            if (PORT.onChat(text, System.currentTimeMillis())) {
+                PORT.save();
+                java.util.regex.Matcher m = Portfolio.FILLED.matcher(Market.strip(text).trim());
+                if (CONFIG.alerts && m.matches()) alert("Order filled: " + m.group(2) + "x " + m.group(3) + ". Claim it in Manage Orders.", false);
+            }
+        });
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             Screen p = pending;
             if (p != null) { pending = null; mc.gui.setScreen(p); }
@@ -65,6 +76,7 @@ public final class Terminal implements ClientModInitializer {
             while (openKey.consumeClick()) pressed = true;
             if (pressed) mc.gui.setScreen(new TerminalScreen());
             if (++ticks % 20 == 0) readPurse(mc);
+            if (ticks % 40 == 0 && CONFIG.alerts) checkOutbid(mc);
         });
 
         // Hover any item in any menu or your inventory and press B: open it in the terminal.
@@ -90,6 +102,39 @@ public final class Terminal implements ClientModInitializer {
                     pending = TerminalScreen.forItem(m.isEmpty() ? null : m.get(0));
                     return 1;
                 }))));
+    }
+
+    private static final java.util.Set<String> outbid = new java.util.HashSet<>();
+
+    /** Tells you once when one of your open orders drops off the top of the book. */
+    private static void checkOutbid(Minecraft mc) {
+        if (mc.player == null) return;
+        java.util.Set<String> behind = new java.util.HashSet<>();
+        for (Portfolio.Order o : PORT.orderList()) {
+            String id = Feed.idForName(o.name);
+            if (id == null || Portfolio.status(o, Feed.snapshot.get(id)) != Portfolio.Status.BEHIND) continue;
+            String k = o.at + o.name;
+            behind.add(k);
+            if (outbid.add(k)) {
+                Market.Product p = Feed.snapshot.get(id);
+                alert((o.buy ? "Outbid on " : "Undercut on ") + o.name + ": yours " + Fmt.px(o.price) + ", best "
+                        + Fmt.px(o.buy ? p.bid() : p.ask()), true);
+            }
+        }
+        outbid.retainAll(behind);
+    }
+
+    static void alert(String text, boolean bad) {
+        Minecraft mc = Minecraft.getInstance();
+        mc.execute(() -> {
+            if (mc.player != null) mc.player.sendSystemMessage(net.minecraft.network.chat.Component.literal("[SBT] " + text)
+                    .withStyle(bad ? net.minecraft.ChatFormatting.RED : net.minecraft.ChatFormatting.GREEN));
+            try {
+                mc.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                        bad ? net.minecraft.sounds.SoundEvents.NOTE_BLOCK_BASS : net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING, bad ? 0.7f : 1.4f));
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     /** Opens a screen on the next tick (safe from any event). */

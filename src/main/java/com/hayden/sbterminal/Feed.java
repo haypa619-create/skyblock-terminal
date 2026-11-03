@@ -60,6 +60,21 @@ public final class Feed {
         lastPoll = now;
     }
 
+    private static volatile Map<String, String> byName = Map.of();
+    private static volatile int byNameFrom = -1;
+
+    /** Bazaar product id for a display name ("Enchanted Coal"), or null. */
+    public static String idForName(String name) {
+        Map<String, String> n = names;
+        if (n.size() != byNameFrom) {
+            Map<String, String> m = new java.util.HashMap<>();
+            for (Map.Entry<String, String> e : n.entrySet()) m.putIfAbsent(Items.norm(e.getValue()), e.getKey());
+            byName = m;
+            byNameFrom = n.size();
+        }
+        return byName.get(Items.norm(name));
+    }
+
     private static void tick() {
         long now = System.currentTimeMillis();
         int every = terminalOpen ? Terminal.CONFIG.pollOpenSecs : Terminal.CONFIG.pollClosedSecs;

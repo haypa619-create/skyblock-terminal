@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Portfolio (PORT, F7): positions with average cost, live value after Bazaar tax, unrealized P&L, plus realized P&L for today and all time. Built from your Bazaar chat lines (claims and insta-trades), nothing to enter by hand. POS sets a position you held before tracking.
+- Open orders list with ON TOP / OUTBID / FILLED status against the live book.
+- Chat and sound alerts when an order is outbid, undercut or filled (config: alerts).
+
 ## 0.3.0
 
 - Order ticket on every item page: BUY / SELL tabs, quantity chips (64, 640, 1K, 10K, MAX from your purse), price that joins the best bid or ask (override with PX), total and share of purse.

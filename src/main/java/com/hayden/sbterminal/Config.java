@@ -18,6 +18,10 @@ public final class Config {
     public int pollOpenSecs = 5, pollClosedSecs = 20;
     /** Terminal font: true = bundled monospace (IBM Plex Mono), false = Minecraft's. */
     public boolean monoFont = true;
+    /** Bazaar tax used to value positions (claim lines are already net). Lower it if you own the Community upgrades. */
+    public double taxPct = 1.25;
+    /** Chat + sound when an order is outbid or filled. */
+    public boolean alerts = true;
     /** Order ticket: last quantity used for buy orders. */
     public long ticketQty = 1000;
     /** Where you were, so the terminal reopens there. */
